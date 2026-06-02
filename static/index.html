@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>おはなしのきおく｜小学校受験れんしゅう</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&family=Kosugi+Maru&display=swap');
+  :root{
+    --bg:#fef6e4;--paper:#fffdf7;--ink:#4a3f35;--sun:#ffb627;--sky:#6ec6e8;
+    --grass:#7dc95e;--berry:#ef6f6c;--grape:#9b7ede;--line:#e8dcc4;--shadow:rgba(120,90,40,.18);
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{font-family:'Zen Maru Gothic','Kosugi Maru',sans-serif;
+    background:radial-gradient(circle at 12% 18%,#fff3d6 0 6%,transparent 6.5%),
+      radial-gradient(circle at 88% 12%,#ffe2dd 0 5%,transparent 5.5%),
+      radial-gradient(circle at 78% 82%,#d8f0c8 0 7%,transparent 7.5%),var(--bg);
+    color:var(--ink);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:16px;}
+  .wrap{width:100%;max-width:640px;flex:1;display:flex;flex-direction:column;}
+  header{text-align:center;padding:8px 0 14px;}
+  header h1{font-weight:900;font-size:clamp(22px,6vw,32px);letter-spacing:.04em;text-shadow:2px 2px 0 #ffe6a8;}
+  header h1 .leaf{color:var(--grass);}
+  header p{font-size:13px;color:#9a8a72;margin-top:2px;}
+  .card{background:var(--paper);border-radius:28px;box-shadow:0 10px 0 var(--line),0 18px 30px var(--shadow);
+    border:3px solid #fff;padding:22px;flex:1;display:flex;flex-direction:column;}
+  .levelbar{display:flex;gap:10px;margin-bottom:16px;}
+  .levelbar button{flex:1;border:none;border-radius:18px;padding:12px 4px;font-family:inherit;
+    font-weight:700;font-size:15px;cursor:pointer;background:#f3ead6;color:#a8967a;transition:.15s;}
+  .levelbar button.on{background:var(--sun);color:#fff;box-shadow:0 4px 0 #e09a10;transform:translateY(-1px);}
+  .stage{flex:1;display:flex;flex-direction:column;justify-content:center;}
+  .listen{text-align:center;}
+  .bigicon{font-size:74px;animation:bob 2.4s ease-in-out infinite;}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+  .listen h2{margin:14px 0 6px;font-size:21px;font-weight:900;}
+  .listen p{font-size:14px;color:#9a8a72;line-height:1.7;padding:0 10px;}
+  .playbtn{margin:22px auto 8px;display:flex;align-items:center;gap:10px;border:none;border-radius:50px;
+    padding:16px 30px;cursor:pointer;font-family:inherit;font-weight:900;font-size:18px;color:#fff;
+    background:linear-gradient(180deg,var(--sky),#4fb3da);box-shadow:0 6px 0 #3a9bc4,0 10px 18px rgba(80,150,200,.4);transition:.1s;}
+  .playbtn:active{transform:translateY(4px);box-shadow:0 2px 0 #3a9bc4;}
+  .playbtn.playing{background:linear-gradient(180deg,#ffcf6b,var(--sun));box-shadow:0 6px 0 #e09a10;}
+  .playbtn.grey{background:linear-gradient(180deg,#b5b5b5,#909090);box-shadow:0 6px 0 #707070;font-size:15px;padding:13px 26px;}
+  .playbtn:disabled{opacity:.55;pointer-events:none;}
+  .hint{font-size:12px;color:#b3a488;margin-top:10px;line-height:1.6;}
+  .qhead{text-align:center;margin-bottom:6px;}
+  .qnum{display:inline-block;background:var(--grape);color:#fff;font-weight:700;font-size:13px;padding:3px 14px;border-radius:30px;}
+  .qtext{text-align:center;font-size:20px;font-weight:900;margin:12px 8px 14px;line-height:1.5;}
+  .replay{display:block;margin:0 auto 14px;border:none;background:#f3ead6;color:#8a7a5e;font-family:inherit;
+    font-weight:700;font-size:13px;border-radius:30px;padding:8px 18px;cursor:pointer;}
+  .choices{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  .choice{aspect-ratio:1/1;border:3px solid var(--line);border-radius:22px;background:#fff;display:flex;
+    flex-direction:column;align-items:center;justify-content:center;gap:6px;cursor:pointer;transition:.12s;
+    position:relative;overflow:hidden;box-shadow:0 5px 0 var(--line);}
+  .choice:active{transform:translateY(3px);box-shadow:0 2px 0 var(--line);}
+  .choice .emoji{font-size:clamp(46px,14vw,70px);line-height:1;}
+  .choice .lbl{font-size:15px;font-weight:700;color:#8a7a5e;}
+  .choice.correct{border-color:var(--grass);background:#eefae6;box-shadow:0 5px 0 #b9e3a4;}
+  .choice.wrong{border-color:var(--berry);background:#fdeceb;box-shadow:0 5px 0 #f5c0bd;}
+  .choice .mark{position:absolute;top:6px;right:8px;font-size:30px;opacity:0;transition:.2s;}
+  .choice.correct .mark,.choice.wrong .mark{opacity:1;}
+  .feedback{text-align:center;margin-top:16px;min-height:30px;font-weight:900;font-size:19px;}
+  .feedback.good{color:var(--grass);}.feedback.bad{color:var(--berry);}
+  .nextbtn{margin:14px auto 2px;border:none;border-radius:50px;padding:13px 32px;cursor:pointer;font-family:inherit;
+    font-weight:900;font-size:16px;color:#fff;background:linear-gradient(180deg,#8fd96f,var(--grass));
+    box-shadow:0 5px 0 #5fa844;opacity:0;pointer-events:none;transition:.2s;}
+  .nextbtn.show{opacity:1;pointer-events:auto;}
+  .nextbtn:active{transform:translateY(3px);box-shadow:0 2px 0 #5fa844;}
+  .result{text-align:center;}
+  .result .star{font-size:70px;animation:pop .5s ease;}
+  @keyframes pop{0%{transform:scale(0)}70%{transform:scale(1.2)}100%{transform:scale(1)}}
+  .result h2{font-size:24px;font-weight:900;margin:10px 0;}
+  .result .score{font-size:42px;font-weight:900;color:var(--sun);}
+  .result p{color:#9a8a72;margin:8px 0 18px;}
+  .loading{text-align:center;padding:30px 0;}
+  .loading .spin{font-size:54px;display:inline-block;animation:spin 1.2s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .loading p{margin-top:14px;color:#9a8a72;font-weight:700;}
+  .err{background:#fdeceb;border:2px solid var(--berry);border-radius:16px;padding:16px;margin-top:10px;
+    color:#b5403d;font-size:13px;line-height:1.7;font-weight:700;text-align:center;}
+  footer{text-align:center;font-size:11px;color:#c4b596;padding:14px 0 4px;line-height:1.7;}
+  .toggle{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:14px;font-size:12px;color:#9a8a72;font-weight:700;}
+  .toggle input{width:18px;height:18px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>おはなしの<span class="leaf">き</span>おく</h1>
+    <p>よく きいて、こたえを えらんでね</p>
+  </header>
+  <div class="card">
+    <div class="levelbar">
+      <button id="lv-keio" class="on" onclick="setLevel('keio')">慶應横浜</button>
+      <button id="lv-toin" onclick="setLevel('toin')">桐蔭学園</button>
+    </div>
+    <div class="stage" id="stage"></div>
+  </div>
+  <footer>※ 問題はAIが毎回生成し、読み上げは ElevenLabs の音声を使用します。<br>本番モードでは、お話は一度しか聞けません。</footer>
+</div>
+
+<script>
+const state={level:'keio',story:'',questions:[],qIndex:0,correctCount:0,honban:false};
+const stage=document.getElementById('stage');
+let currentAudio=null;
+
+function setLevel(lv){state.level=lv;
+  document.getElementById('lv-keio').classList.toggle('on',lv==='keio');
+  document.getElementById('lv-toin').classList.toggle('on',lv==='toin');
+  showStart();}
+
+function stopAudio(){if(currentAudio){currentAudio.pause();}}
+
+function ensurePlayer(){
+  if(!currentAudio){currentAudio=new Audio();currentAudio.setAttribute('playsinline','');}
+  return currentAudio;
+}
+function unlockAudio(){
+  const a=ensurePlayer();
+  try{
+    a.muted=true;
+    a.src='data:audio/mpeg;base64,SUQzAwAAAAAAIVRTU0UAAAAPAAADTGF2ZjU4LjI5LjEwMAAAAAAAAAAAAAAA//tQxAADB8AhSmxhIIEVCSiJrDCQBTcu3UrAAEFMnEAOAAYAOEAAACFAAAA';
+    const p=a.play();
+    if(p&&p.then)p.then(()=>{a.pause();a.muted=false;}).catch(()=>{a.muted=false;});
+  }catch(e){a.muted=false;}
+}
+
+async function playTTS(text,btn){
+  const a=ensurePlayer();
+  a.pause();
+  if(btn){btn.classList.add('playing');btn.disabled=true;const s=btn.querySelector('span');if(s)s.textContent='🔊';}
+  const restore=()=>{if(btn){btn.classList.remove('playing');btn.disabled=false;const s=btn.querySelector('span');if(s)s.textContent='▶️';}};
+  try{
+    const r=await fetch('/api/tts?text='+encodeURIComponent(text));
+    if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error||('HTTP '+r.status));}
+    const blob=await r.blob();
+    a.muted=false;
+    a.src=URL.createObjectURL(blob);
+    a.onended=restore;
+    await new Promise(res=>{a.oncanplaythrough=res;a.onerror=res;a.load();});
+    a.currentTime=0;
+    await a.play();
+  }catch(e){restore();showError('音声の再生に失敗しました：'+e.message);}
+}
+
+function showError(msg){
+  const d=document.createElement('div');d.className='err';d.textContent=msg;
+  stage.appendChild(d);
+}
+
+function showStart(){
+  stopAudio();
+  const lvName=state.level==='keio'?'慶應横浜':'桐蔭学園';
+  stage.innerHTML=`<div class="listen">
+    <div class="bigicon">📖</div>
+    <h2>${lvName}レベル</h2>
+    <p>あたらしい おはなしを つくるよ。<br>ボタンを おして はじめよう！</p>
+    <button class="playbtn" onclick="startStory()"><span>✨</span> おはなしを つくる</button>
+    <div class="toggle"><input type="checkbox" id="honban" ${state.honban?'checked':''} onchange="state.honban=this.checked">
+      <label for="honban">本番モード（お話は1回だけ）</label></div>
+    <div class="hint">本番モードは、慣れてきたら ON にすると<br>実際の試験に近い練習ができます</div>
+    <a href="/compare" style="display:inline-block;margin-top:16px;color:#9b7ede;font-weight:700;font-size:13px;text-decoration:none;">🎙️ 声くらべ（本番の声を決める）→</a>
+    <a href="/pack" style="display:block;margin-top:10px;color:#7dc95e;font-weight:700;font-size:13px;text-decoration:none;">🎒 おでかけパックを作る（オフライン用）→</a>
+  </div>`;
+}
+
+async function startStory(){
+  unlockAudio();
+  stage.innerHTML=`<div class="loading"><span class="spin">🎡</span><p>おはなしを かんがえているよ…</p></div>`;
+  try{
+    const r=await fetch('/api/story?level='+state.level);
+    const data=await r.json();
+    if(data.error)throw new Error(data.error);
+    state.story=data.story;state.questions=data.questions;
+    state.qIndex=0;state.correctCount=0;state.playedOnce=false;
+    showListen();
+  }catch(e){
+    stage.innerHTML=`<div class="listen"><div class="bigicon">😢</div>
+      <h2>おはなしが つくれなかったよ</h2>
+      <button class="playbtn" onclick="startStory()"><span>🔄</span> もういちど</button></div>`;
+    showError(e.message);
+  }
+}
+
+function showListen(){
+  const replayDisabled=state.honban;
+  stage.innerHTML=`<div class="listen">
+    <div class="bigicon">🎧</div>
+    <h2>おはなしを よく きいてね</h2>
+    <p>${state.honban?'おはなしは いちど だけ ながれるよ':'なんども きけるよ'}</p>
+    <button class="playbtn" id="playBtn" onclick="onPlay()"><span>▶️</span> おはなしを きく</button>
+    <button class="playbtn grey" onclick="goQuestions()">もんだいへ すすむ →</button>
+    <div class="hint" id="listenHint">${state.honban?'※ 本番モード：再生は1回だけです':'※ 何度でも きけます'}</div>
+  </div>`;
+}
+
+function onPlay(){
+  if(state.honban&&state.playedOnce){return;}
+  state.playedOnce=true;
+  const btn=document.getElementById('playBtn');
+  playTTS(state.story,btn);
+  if(state.honban){
+    btn.disabled=true;btn.style.opacity='.5';
+    document.getElementById('listenHint').textContent='※ 本番モード：もう再生できません';
+  }
+}
+
+function goQuestions(){stopAudio();state.qIndex=0;showQuestion();}
+
+function showQuestion(){
+  const q=state.questions[state.qIndex];const total=state.questions.length;
+  const choices=q.choices.map((c,i)=>({...c,_i:i})).sort(()=>Math.random()-0.5);
+  stage.innerHTML=`<div class="qhead"><span class="qnum">もんだい ${state.qIndex+1} / ${total}</span></div>
+    <div class="qtext">${q.q}</div>
+    <button class="replay" onclick="playTTS(state.questions[state.qIndex].q,null)">🔊 もんだいを きく</button>
+    <div class="choices" id="choices"></div>
+    <div class="feedback" id="fb"></div>
+    <button class="nextbtn" id="nextBtn" onclick="nextQuestion()">${state.qIndex+1<total?'つぎへ →':'けっか を みる 🎉'}</button>`;
+  const wrap=document.getElementById('choices');
+  choices.forEach(c=>{
+    const b=document.createElement('button');b.className='choice';
+    b.innerHTML=`<span class="mark">${c.correct?'⭕':'❌'}</span><span class="emoji">${c.emoji}</span><span class="lbl">${c.label}</span>`;
+    b.onclick=()=>answer(b,c.correct,wrap);wrap.appendChild(b);
+  });
+  setTimeout(()=>playTTS(q.q,null),300);
+}
+
+function answer(btn,correct,wrap){
+  if(wrap.dataset.done)return;wrap.dataset.done='1';
+  const fb=document.getElementById('fb');
+  if(correct){btn.classList.add('correct');fb.textContent='せいかい！ ⭐';fb.className='feedback good';state.correctCount++;}
+  else{btn.classList.add('wrong');fb.textContent='おしい！ ⭕のほうだよ';fb.className='feedback bad';
+    const cb=[...wrap.children].find(el=>el.querySelector('.mark').textContent==='⭕');if(cb)cb.classList.add('correct');}
+  document.getElementById('nextBtn').classList.add('show');
+}
+
+function nextQuestion(){stopAudio();state.qIndex++;
+  if(state.qIndex<state.questions.length)showQuestion();else showResult();}
+
+function showResult(){
+  const total=state.questions.length,c=state.correctCount;
+  const star=c===total?'🏆':c>=Math.ceil(total*0.6)?'⭐':'🌱';
+  const msg=c===total?'ぜんもん せいかい！すごい！':c>=Math.ceil(total*0.6)?'よく できました！':'つぎは もっと できるよ！';
+  stage.innerHTML=`<div class="result"><div class="star">${star}</div>
+    <h2>${msg}</h2><div class="score">${c} / ${total}</div>
+    <p>もういちど あたらしい おはなしに ちょうせん しよう</p>
+    <button class="playbtn" style="margin-left:auto;margin-right:auto;" onclick="showStart()"><span>✨</span> つぎの おはなし</button></div>`;
+}
+
+showStart();
+</script>
+</body>
+</html>

@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>おはなしのきおく｜おでかけパック</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&family=Kosugi+Maru&display=swap');
+  :root{--bg:#fef6e4;--paper:#fffdf7;--ink:#4a3f35;--sun:#ffb627;--sky:#6ec6e8;
+    --grass:#7dc95e;--berry:#ef6f6c;--grape:#9b7ede;--line:#e8dcc4;--shadow:rgba(120,90,40,.18);}
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{font-family:'Zen Maru Gothic','Kosugi Maru',sans-serif;
+    background:radial-gradient(circle at 12% 18%,#fff3d6 0 6%,transparent 6.5%),
+      radial-gradient(circle at 88% 12%,#ffe2dd 0 5%,transparent 5.5%),
+      radial-gradient(circle at 78% 82%,#d8f0c8 0 7%,transparent 7.5%),var(--bg);
+    color:var(--ink);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:16px;}
+  .wrap{width:100%;max-width:680px;flex:1;display:flex;flex-direction:column;}
+  header{text-align:center;padding:8px 0 12px;}
+  header h1{font-weight:900;font-size:clamp(22px,6vw,30px);letter-spacing:.04em;text-shadow:2px 2px 0 #ffe6a8;}
+  header h1 .leaf{color:var(--grass);}
+  header .badge{display:inline-block;background:var(--grape);color:#fff;font-size:12px;font-weight:700;
+    padding:3px 14px;border-radius:30px;margin-top:6px;}
+  .card{background:var(--paper);border-radius:28px;box-shadow:0 10px 0 var(--line),0 18px 30px var(--shadow);
+    border:3px solid #fff;padding:22px;flex:1;display:flex;flex-direction:column;}
+  .stage{flex:1;display:flex;flex-direction:column;justify-content:center;}
+  .listen{text-align:center;}
+  .bigicon{font-size:74px;animation:bob 2.4s ease-in-out infinite;}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+  .listen h2{margin:14px 0 6px;font-size:21px;font-weight:900;}
+  .listen p{font-size:14px;color:#9a8a72;line-height:1.7;padding:0 10px;}
+  .playbtn{margin:20px auto 8px;display:flex;align-items:center;gap:10px;border:none;border-radius:50px;
+    padding:16px 30px;cursor:pointer;font-family:inherit;font-weight:900;font-size:18px;color:#fff;
+    background:linear-gradient(180deg,var(--sky),#4fb3da);box-shadow:0 6px 0 #3a9bc4,0 10px 18px rgba(80,150,200,.4);transition:.1s;}
+  .playbtn:active{transform:translateY(4px);box-shadow:0 2px 0 #3a9bc4;}
+  .playbtn.playing{background:linear-gradient(180deg,#ffcf6b,var(--sun));box-shadow:0 6px 0 #e09a10;}
+  .playbtn.grey{background:linear-gradient(180deg,#b5b5b5,#909090);box-shadow:0 6px 0 #707070;font-size:15px;padding:13px 26px;}
+  .playbtn:disabled{opacity:.5;}
+  .hint{font-size:12px;color:#b3a488;margin-top:10px;line-height:1.6;}
+  .qhead{text-align:center;margin-bottom:6px;}
+  .qnum{display:inline-block;background:var(--grape);color:#fff;font-weight:700;font-size:13px;padding:3px 14px;border-radius:30px;}
+  .qtext{text-align:center;font-size:20px;font-weight:900;margin:12px 8px 14px;line-height:1.5;}
+  .replay{display:block;margin:0 auto 14px;border:none;background:#f3ead6;color:#8a7a5e;font-family:inherit;
+    font-weight:700;font-size:13px;border-radius:30px;padding:8px 18px;cursor:pointer;}
+  .choices{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  .choice{aspect-ratio:1/1;border:3px solid var(--line);border-radius:22px;background:#fff;display:flex;
+    flex-direction:column;align-items:center;justify-content:center;gap:6px;cursor:pointer;transition:.12s;
+    position:relative;overflow:hidden;box-shadow:0 5px 0 var(--line);}
+  .choice:active{transform:translateY(3px);box-shadow:0 2px 0 var(--line);}
+  .choice .emoji{font-size:clamp(46px,14vw,70px);line-height:1;}
+  .choice .lbl{font-size:15px;font-weight:700;color:#8a7a5e;}
+  .choice.correct{border-color:var(--grass);background:#eefae6;box-shadow:0 5px 0 #b9e3a4;}
+  .choice.wrong{border-color:var(--berry);background:#fdeceb;box-shadow:0 5px 0 #f5c0bd;}
+  .choice .mark{position:absolute;top:6px;right:8px;font-size:30px;opacity:0;transition:.2s;}
+  .choice.correct .mark,.choice.wrong .mark{opacity:1;}
+  .feedback{text-align:center;margin-top:16px;min-height:30px;font-weight:900;font-size:19px;}
+  .feedback.good{color:var(--grass);}.feedback.bad{color:var(--berry);}
+  .nextbtn{margin:14px auto 2px;border:none;border-radius:50px;padding:13px 32px;cursor:pointer;font-family:inherit;
+    font-weight:900;font-size:16px;color:#fff;background:linear-gradient(180deg,#8fd96f,var(--grass));
+    box-shadow:0 5px 0 #5fa844;opacity:0;pointer-events:none;transition:.2s;}
+  .nextbtn.show{opacity:1;pointer-events:auto;}
+  .nextbtn:active{transform:translateY(3px);box-shadow:0 2px 0 #5fa844;}
+  .result{text-align:center;}
+  .result .star{font-size:70px;animation:pop .5s ease;}
+  @keyframes pop{0%{transform:scale(0)}70%{transform:scale(1.2)}100%{transform:scale(1)}}
+  .result h2{font-size:24px;font-weight:900;margin:10px 0;}
+  .result .score{font-size:42px;font-weight:900;color:var(--sun);}
+  .result p{color:#9a8a72;margin:8px 0 18px;}
+  .progressdots{display:flex;gap:6px;justify-content:center;margin-bottom:14px;flex-wrap:wrap;}
+  .dot{width:14px;height:14px;border-radius:50%;background:#e8dcc4;}
+  .dot.done{background:var(--grass);}
+  .dot.now{background:var(--sun);transform:scale(1.3);}
+  .toggle{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:14px;font-size:12px;color:#9a8a72;font-weight:700;}
+  .toggle input{width:18px;height:18px;}
+  footer{text-align:center;font-size:11px;color:#c4b596;padding:14px 0 4px;line-height:1.7;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>おはなしの<span class="leaf">き</span>おく</h1>
+    <div class="badge" id="badge">おでかけパック</div>
+  </header>
+  <div class="card">
+    <div class="stage" id="stage"></div>
+  </div>
+  <footer>※ ネット接続なしで使えます（問題と音声を内蔵）<br>本番モードでは、お話は一度しか聞けません。</footer>
+</div>
+
+<script>
+const PACK = /*__PACK_DATA__*/null/*__END__*/;
+const state={setIndex:0,qIndex:0,correctTotal:0,answeredTotal:0,honban:false,playedOnce:false};
+const stage=document.getElementById('stage');
+let currentAudio=null;
+
+document.getElementById('badge').textContent =
+  (PACK?PACK.level_name:'') + ' / ぜんぶで ' + (PACK?PACK.sets.length:0) + 'もん';
+
+function stopAudio(){if(currentAudio){currentAudio.pause();}}
+
+// iOS対策：単一のAudio要素を使い回す（毎回new Audioするとロックされやすい）
+function ensurePlayer(){
+  if(!currentAudio){
+    currentAudio=new Audio();
+    currentAudio.setAttribute('playsinline','');
+  }
+  return currentAudio;
+}
+// 初回のユーザータップで音声を“解錠”しておく（iPhone/iPadの自動再生制限対策）
+function unlockAudio(){
+  const a=ensurePlayer();
+  try{
+    a.muted=true;
+    a.src='data:audio/mpeg;base64,SUQzAwAAAAAAIVRTU0UAAAAPAAADTGF2ZjU4LjI5LjEwMAAAAAAAAAAAAAAA//tQxAADB8AhSmxhIIEVCSiJrDCQBTcu3UrAAEFMnEAOAAYAOEAAACFAAAA';
+    const p=a.play();
+    if(p&&p.then)p.then(()=>{a.pause();a.muted=false;}).catch(()=>{a.muted=false;});
+  }catch(e){a.muted=false;}
+}
+
+function playSrc(src,btn){
+  if(!src)return;
+  const a=ensurePlayer();
+  a.pause();
+  if(btn){btn.classList.add('playing');btn.disabled=true;const s=btn.querySelector('span');if(s)s.textContent='🔊';}
+  const restore=()=>{if(btn){btn.classList.remove('playing');btn.disabled=false;const s=btn.querySelector('span');if(s)s.textContent='▶️';}};
+  a.muted=false;
+  a.src=src;
+  a.onended=restore;
+  a.oncanplaythrough=()=>{a.oncanplaythrough=null;a.currentTime=0;a.play().catch(()=>restore());};
+  a.onerror=()=>restore();
+  a.load();
+}
+
+function dots(){
+  let h='<div class="progressdots">';
+  for(let i=0;i<PACK.sets.length;i++){
+    const cls=i<state.setIndex?'done':(i===state.setIndex?'now':'');
+    h+=`<span class="dot ${cls}"></span>`;
+  }
+  return h+'</div>';
+}
+
+function showStart(){
+  stopAudio();
+  stage.innerHTML=`<div class="listen">
+    <div class="bigicon">🎒</div>
+    <h2>${PACK.level_name}レベル ${PACK.sets.length}もん</h2>
+    <p>じゅんびは いいかな？<br>ネットが なくても れんしゅう できるよ</p>
+    <button class="playbtn" onclick="startSet()"><span>✨</span> はじめる</button>
+    <div class="toggle"><input type="checkbox" id="honban" onchange="state.honban=this.checked">
+      <label for="honban">本番モード（お話は1回だけ）</label></div>
+    <div class="hint">本番モードは、慣れてきたら ON にすると<br>実際の試験に近い練習ができます</div>
+  </div>`;
+}
+
+function startSet(){
+  unlockAudio();
+  state.qIndex=0;state.playedOnce=false;
+  showListen();
+}
+
+function showListen(){
+  const set=PACK.sets[state.setIndex];
+  stage.innerHTML=dots()+`<div class="listen">
+    <div class="bigicon">🎧</div>
+    <h2>${state.setIndex+1}つめの おはなし</h2>
+    <p>${state.honban?'おはなしは いちど だけ ながれるよ':'なんども きけるよ'}</p>
+    <button class="playbtn" id="playBtn" onclick="onPlay()"><span>▶️</span> おはなしを きく</button>
+    <button class="playbtn grey" onclick="goQuestions()">もんだいへ すすむ →</button>
+    <div class="hint" id="listenHint">${state.honban?'※ 本番モード：再生は1回だけです':'※ 何度でも きけます'}</div>
+  </div>`;
+}
+
+function onPlay(){
+  if(state.honban&&state.playedOnce)return;
+  state.playedOnce=true;
+  const set=PACK.sets[state.setIndex];
+  const btn=document.getElementById('playBtn');
+  playSrc(set.story_audio,btn);
+  if(state.honban){btn.disabled=true;btn.style.opacity='.5';
+    document.getElementById('listenHint').textContent='※ 本番モード：もう再生できません';}
+}
+
+function goQuestions(){stopAudio();state.qIndex=0;showQuestion();}
+
+function showQuestion(){
+  const set=PACK.sets[state.setIndex];
+  const q=set.questions[state.qIndex];const total=set.questions.length;
+  const choices=q.choices.map((c,i)=>({...c,_i:i})).sort(()=>Math.random()-0.5);
+  stage.innerHTML=`<div class="qhead"><span class="qnum">おはなし ${state.setIndex+1} ｜ もんだい ${state.qIndex+1}/${total}</span></div>
+    <div class="qtext">${q.q}</div>
+    <button class="replay" id="qReplay">🔊 もんだいを きく</button>
+    <div class="choices" id="choices"></div>
+    <div class="feedback" id="fb"></div>
+    <button class="nextbtn" id="nextBtn" onclick="nextQuestion()">${state.qIndex+1<total?'つぎへ →':(state.setIndex+1<PACK.sets.length?'つぎの おはなし →':'けっか を みる 🎉')}</button>`;
+  document.getElementById('qReplay').onclick=()=>playSrc(q.q_audio,null);
+  const wrap=document.getElementById('choices');
+  choices.forEach(c=>{
+    const b=document.createElement('button');b.className='choice';
+    b.innerHTML=`<span class="mark">${c.correct?'⭕':'❌'}</span><span class="emoji">${c.emoji}</span><span class="lbl">${c.label}</span>`;
+    b.onclick=()=>answer(b,c.correct,wrap);wrap.appendChild(b);
+  });
+  setTimeout(()=>playSrc(q.q_audio,null),300);
+}
+
+function answer(btn,correct,wrap){
+  if(wrap.dataset.done)return;wrap.dataset.done='1';
+  state.answeredTotal++;
+  const fb=document.getElementById('fb');
+  if(correct){btn.classList.add('correct');fb.textContent='せいかい！ ⭐';fb.className='feedback good';state.correctTotal++;}
+  else{btn.classList.add('wrong');fb.textContent='おしい！ ⭕のほうだよ';fb.className='feedback bad';
+    const cb=[...wrap.children].find(el=>el.querySelector('.mark').textContent==='⭕');if(cb)cb.classList.add('correct');}
+  document.getElementById('nextBtn').classList.add('show');
+}
+
+function nextQuestion(){
+  stopAudio();
+  const set=PACK.sets[state.setIndex];
+  state.qIndex++;
+  if(state.qIndex<set.questions.length){showQuestion();return;}
+  // 次のお話へ
+  state.setIndex++;
+  if(state.setIndex<PACK.sets.length){state.qIndex=0;state.playedOnce=false;showListen();}
+  else showResult();
+}
+
+function showResult(){
+  const c=state.correctTotal,total=state.answeredTotal;
+  const ratio=total?c/total:0;
+  const star=ratio===1?'🏆':ratio>=0.6?'⭐':'🌱';
+  const msg=ratio===1?'ぜんもん せいかい！すごい！':ratio>=0.6?'よく できました！':'つぎは もっと できるよ！';
+  stage.innerHTML=`<div class="result"><div class="star">${star}</div>
+    <h2>${msg}</h2><div class="score">${c} / ${total}</div>
+    <p>${PACK.sets.length}つの おはなし、おつかれさま！</p>
+    <button class="playbtn" style="margin-left:auto;margin-right:auto;" onclick="restart()"><span>🔄</span> もういちど</button></div>`;
+}
+
+function restart(){state.setIndex=0;state.qIndex=0;state.correctTotal=0;state.answeredTotal=0;state.playedOnce=false;showStart();}
+
+if(!PACK){stage.innerHTML='<div class="listen"><div class="bigicon">😢</div><h2>データが ありません</h2></div>';}
+else showStart();
+</script>
+</body>
+</html>

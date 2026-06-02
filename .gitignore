@@ -1,0 +1,15 @@
+# APIキー・秘密情報
+.env
+
+# 生成物（音声キャッシュ・おでかけパック）
+audio_cache/
+packs/
+
+# 使用ログ
+usage_log.csv
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/

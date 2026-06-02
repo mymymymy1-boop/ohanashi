@@ -1,0 +1,29 @@
+# Render デプロイ設定（Blueprint）
+# Render ダッシュボードで「New +」→「Blueprint」→ このリポジトリを選ぶと自動で読まれます。
+# sync: false の項目（APIキー・パスワード）はデプロイ時にダッシュボードで入力します。
+services:
+  - type: web
+    name: ohanashi
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: ANTHROPIC_API_KEY
+        sync: false        # ← ダッシュボードで入力
+      - key: ELEVENLABS_API_KEY
+        sync: false        # ← ダッシュボードで入力
+      - key: ELEVENLABS_VOICE_ID
+        value: "21m00Tcm4TlvDq8ikWAM"
+      - key: ELEVENLABS_MODEL
+        value: "eleven_v3"
+      - key: COMPARE_VOICES
+        value: "Rachel:21m00Tcm4TlvDq8ikWAM,Charlotte:XB0fDUnXU5powFXDhCwa,Matilda:XrExE9yKIg1WjnnlVkGX"
+      - key: COMPARE_MODELS
+        value: "eleven_v3,eleven_multilingual_v2"
+      - key: APP_USERNAME
+        value: "ohanashi"
+      - key: APP_PASSWORD
+        sync: false        # ← ダッシュボードで好きなパスワードを入力（必須）

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>声くらべ｜おはなしのきおく</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&display=swap');
+  :root{--bg:#fef6e4;--paper:#fffdf7;--ink:#4a3f35;--sun:#ffb627;--sky:#6ec6e8;
+    --grass:#7dc95e;--grape:#9b7ede;--line:#e8dcc4;--shadow:rgba(120,90,40,.18);}
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  body{font-family:'Zen Maru Gothic',sans-serif;background:var(--bg);color:var(--ink);
+    min-height:100vh;padding:18px;}
+  .wrap{max-width:680px;margin:0 auto;}
+  h1{font-weight:900;font-size:26px;text-align:center;text-shadow:2px 2px 0 #ffe6a8;margin-bottom:4px;}
+  .sub{text-align:center;color:#9a8a72;font-size:13px;margin-bottom:16px;}
+  .back{display:inline-block;color:var(--sky);font-weight:700;text-decoration:none;font-size:14px;margin-bottom:10px;}
+  .samplebox{background:var(--paper);border:3px solid #fff;border-radius:20px;padding:16px 18px;
+    box-shadow:0 6px 0 var(--line),0 12px 22px var(--shadow);margin-bottom:18px;}
+  .samplebox h3{font-size:14px;color:#8a7a5e;margin-bottom:8px;}
+  .samplebox .txt{font-size:16px;line-height:1.9;font-weight:700;}
+  .samplebox .note{font-size:12px;color:#b3a488;margin-top:10px;line-height:1.6;}
+  textarea{width:100%;border:2px solid var(--line);border-radius:12px;padding:10px;font-family:inherit;
+    font-size:15px;line-height:1.8;margin-top:10px;resize:vertical;min-height:70px;}
+  .grid{display:flex;flex-direction:column;gap:12px;}
+  .row{background:var(--paper);border:3px solid #fff;border-radius:18px;padding:14px 16px;
+    box-shadow:0 5px 0 var(--line);display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+  .row .info{flex:1;min-width:140px;}
+  .row .vname{font-weight:900;font-size:17px;}
+  .row .meta{font-size:12px;color:#9a8a72;margin-top:2px;}
+  .row .meta .badge{display:inline-block;background:#f0e7d2;border-radius:20px;padding:2px 10px;margin-right:6px;font-weight:700;}
+  .row .meta .badge.v3{background:#e7dcf7;color:#6a4fa5;}
+  .playbtn{border:none;border-radius:50px;padding:12px 22px;cursor:pointer;font-family:inherit;
+    font-weight:900;font-size:15px;color:#fff;background:linear-gradient(180deg,var(--sky),#4fb3da);
+    box-shadow:0 5px 0 #3a9bc4;transition:.1s;white-space:nowrap;}
+  .playbtn:active{transform:translateY(3px);box-shadow:0 2px 0 #3a9bc4;}
+  .playbtn.playing{background:linear-gradient(180deg,#ffcf6b,var(--sun));box-shadow:0 5px 0 #e09a10;}
+  .playbtn:disabled{opacity:.5;}
+  .genall{display:block;width:100%;border:none;border-radius:50px;padding:15px;cursor:pointer;
+    font-family:inherit;font-weight:900;font-size:17px;color:#fff;margin:6px 0 18px;
+    background:linear-gradient(180deg,#8fd96f,var(--grass));box-shadow:0 6px 0 #5fa844;}
+  .genall:active{transform:translateY(3px);box-shadow:0 3px 0 #5fa844;}
+  .err{background:#fdeceb;border:2px solid #ef6f6c;border-radius:14px;padding:14px;color:#b5403d;
+    font-weight:700;font-size:13px;text-align:center;margin-bottom:14px;line-height:1.7;}
+  .tip{background:#eef7ff;border:2px solid #bfe1f5;border-radius:14px;padding:14px;font-size:12px;
+    color:#5a7a92;line-height:1.8;margin-bottom:16px;}
+  .tip b{color:#3a6a8a;}
+  .status{font-size:12px;color:#9a8a72;margin-left:auto;font-weight:700;}
+  .status.ok{color:var(--grass);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="/">← おはなしのきおく に もどる</a>
+  <h1>🎙️ 声くらべ</h1>
+  <p class="sub">同じお話を いろいろな声・モデルで聞き比べて、本番の声を決めます</p>
+
+  <div class="tip">
+    <b>使い方</b><br>
+    ① 下のサンプル文（数・色・順序・固有名が入った誤読チェック用）を、複数の声で生成<br>
+    ② 横並びで聞き比べ、<b>数や名前の誤読がなく、試験官のように落ち着いた声</b>を選ぶ<br>
+    ③ 決めたら <code>.env</code> の <b>ELEVENLABS_VOICE_ID</b> と <b>ELEVENLABS_MODEL</b> に設定<br>
+    ※ 候補を増やすには <code>.env</code> の <b>COMPARE_VOICES</b> にVoiceIDを追記
+  </div>
+
+  <div id="errbox"></div>
+
+  <div class="samplebox">
+    <h3>サンプル文（編集できます）</h3>
+    <textarea id="sample"></textarea>
+    <div class="note">※ 本番想定の文に書き換えて比較してもOKです</div>
+  </div>
+
+  <button class="genall" onclick="generateAll()">▶ すべての声で 生成して 聞きくらべる</button>
+
+  <div class="grid" id="grid"></div>
+</div>
+
+<script>
+let combos=[], audios={}, current=null, playingBtn=null;
+
+function showErr(msg){document.getElementById('errbox').innerHTML=`<div class="err">${msg}</div>`;}
+
+async function init(){
+  try{
+    const r=await fetch('/api/compare/list');
+    const d=await r.json();
+    if(d.error)throw new Error(d.error);
+    combos=d.combos; current=d.current;
+    document.getElementById('sample').value=d.sample;
+    render();
+  }catch(e){showErr('設定の読み込みに失敗しました：'+e.message);}
+}
+
+function render(){
+  const grid=document.getElementById('grid');
+  grid.innerHTML='';
+  combos.forEach(c=>{
+    const isV3=c.model.includes('v3');
+    const isCurrent=(c.voice_id===current.voice_id && c.model===current.model);
+    const row=document.createElement('div');
+    row.className='row';
+    row.innerHTML=`
+      <div class="info">
+        <div class="vname">${c.voice_name}${isCurrent?' ⭐いま設定中':''}</div>
+        <div class="meta">
+          <span class="badge ${isV3?'v3':''}">${c.model}</span>
+          <span style="font-size:11px;color:#c4b596">${c.voice_id}</span>
+        </div>
+      </div>
+      <button class="playbtn" id="btn-${c.id}" onclick="playOne('${c.id}')">▶ きく</button>
+      <span class="status" id="st-${c.id}"></span>`;
+    grid.appendChild(row);
+  });
+}
+
+function stopAll(){
+  if(current && current._a){current._a.pause();current._a=null;}
+  Object.values(audios).forEach(a=>{if(a){a.pause();}});
+  if(playingBtn){playingBtn.classList.remove('playing');playingBtn.textContent='▶ きく';playingBtn=null;}
+}
+
+async function ensureAudio(c){
+  if(audios[c.id])return audios[c.id];
+  const text=encodeURIComponent(document.getElementById('sample').value.trim());
+  const st=document.getElementById('st-'+c.id);
+  st.textContent='生成中…';st.className='status';
+  const r=await fetch(`/api/compare/audio?voice_id=${c.voice_id}&model=${c.model}&text=${text}`);
+  if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error||('HTTP '+r.status));}
+  const blob=await r.blob();
+  const a=new Audio(URL.createObjectURL(blob));
+  audios[c.id]=a;
+  st.textContent='✓ 生成ずみ';st.className='status ok';
+  return a;
+}
+
+async function playOne(id){
+  stopAll();
+  const c=combos.find(x=>x.id===id);
+  const btn=document.getElementById('btn-'+id);
+  try{
+    btn.disabled=true;btn.textContent='…';
+    const a=await ensureAudio(c);
+    btn.disabled=false;btn.textContent='■ とめる';btn.classList.add('playing');playingBtn=btn;
+    a.onended=()=>{btn.classList.remove('playing');btn.textContent='▶ きく';playingBtn=null;};
+    await new Promise(res=>{a.oncanplaythrough=res;a.onerror=res;a.load();});
+    a.currentTime=0;
+    await a.play();
+  }catch(e){btn.disabled=false;btn.textContent='▶ きく';showErr('生成に失敗：'+e.message);}
+}
+
+async function generateAll(){
+  document.getElementById('errbox').innerHTML='';
+  for(const c of combos){
+    try{await ensureAudio(c);}catch(e){
+      document.getElementById('st-'+c.id).textContent='✗ 失敗';
+      showErr(`${c.voice_name}(${c.model}) の生成に失敗：${e.message}`);
+    }
+  }
+}
+
+init();
+</script>
+</body>
+</html>

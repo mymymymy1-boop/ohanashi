@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>おでかけパックを作る｜おはなしのきおく</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&display=swap');
+  :root{--bg:#fef6e4;--paper:#fffdf7;--ink:#4a3f35;--sun:#ffb627;--sky:#6ec6e8;
+    --grass:#7dc95e;--grape:#9b7ede;--line:#e8dcc4;--shadow:rgba(120,90,40,.18);}
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  body{font-family:'Zen Maru Gothic',sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;padding:18px;}
+  .wrap{max-width:560px;margin:0 auto;}
+  .back{display:inline-block;color:var(--sky);font-weight:700;text-decoration:none;font-size:14px;margin-bottom:10px;}
+  h1{font-weight:900;font-size:25px;text-align:center;text-shadow:2px 2px 0 #ffe6a8;margin-bottom:4px;}
+  .sub{text-align:center;color:#9a8a72;font-size:13px;margin-bottom:18px;line-height:1.7;}
+  .card{background:var(--paper);border:3px solid #fff;border-radius:22px;padding:22px;
+    box-shadow:0 8px 0 var(--line),0 16px 26px var(--shadow);}
+  label{display:block;font-weight:700;font-size:14px;margin:14px 0 6px;color:#7a6a52;}
+  .seg{display:flex;gap:8px;}
+  .seg button{flex:1;border:2px solid var(--line);background:#fff;border-radius:12px;padding:11px;
+    font-family:inherit;font-weight:700;cursor:pointer;font-size:14px;color:#8a7a5e;}
+  .seg button.on{background:var(--sun);color:#fff;border-color:var(--sun);}
+  .countbox{display:flex;align-items:center;gap:14px;justify-content:center;margin-top:6px;}
+  .countbox button{width:44px;height:44px;border:none;border-radius:50%;background:#f0e7d2;
+    font-size:24px;font-weight:900;cursor:pointer;color:#8a7a5e;}
+  .countbox .n{font-size:32px;font-weight:900;min-width:60px;text-align:center;}
+  .gen{display:block;width:100%;border:none;border-radius:50px;padding:16px;cursor:pointer;
+    font-family:inherit;font-weight:900;font-size:18px;color:#fff;margin-top:22px;
+    background:linear-gradient(180deg,#8fd96f,var(--grass));box-shadow:0 6px 0 #5fa844;}
+  .gen:active{transform:translateY(3px);box-shadow:0 3px 0 #5fa844;}
+  .gen:disabled{opacity:.55;pointer-events:none;}
+  .prog{margin-top:20px;display:none;}
+  .prog.show{display:block;}
+  .bar{height:16px;background:#f0e7d2;border-radius:20px;overflow:hidden;}
+  .bar .fill{height:100%;width:0;background:linear-gradient(90deg,var(--sky),var(--grass));transition:width .4s;}
+  .pmsg{text-align:center;font-weight:700;color:#8a7a5e;margin-top:10px;font-size:14px;}
+  .done{margin-top:18px;text-align:center;display:none;}
+  .done.show{display:block;}
+  .done .dl{display:inline-block;border:none;border-radius:50px;padding:14px 28px;cursor:pointer;
+    font-family:inherit;font-weight:900;font-size:16px;color:#fff;text-decoration:none;
+    background:linear-gradient(180deg,var(--grape),#7d5fc0);box-shadow:0 5px 0 #5a4090;}
+  .err{background:#fdeceb;border:2px solid #ef6f6c;border-radius:14px;padding:14px;color:#b5403d;
+    font-weight:700;font-size:13px;text-align:center;margin-top:14px;line-height:1.7;}
+  .tip{background:#eef7ff;border:2px solid #bfe1f5;border-radius:14px;padding:14px;font-size:12px;
+    color:#5a7a92;line-height:1.9;margin-top:16px;}
+  .tip b{color:#3a6a8a;}
+  .est{text-align:center;font-size:12px;color:#b3a488;margin-top:8px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="/">← おはなしのきおく に もどる</a>
+  <h1>🎒 おでかけパック</h1>
+  <p class="sub">問題と音声をまるごと1ファイルに書き出します。<br>iPadに送れば、ネットなしで練習できます。</p>
+
+  <div class="card">
+    <label>レベル</label>
+    <div class="seg">
+      <button id="lv-keio" class="on" onclick="setLv('keio')">慶應横浜</button>
+      <button id="lv-toin" onclick="setLv('toin')">桐蔭学園</button>
+    </div>
+
+    <label>問題の数</label>
+    <div class="countbox">
+      <button onclick="addCount(-1)">−</button>
+      <span class="n" id="count">10</span>
+      <button onclick="addCount(1)">＋</button>
+    </div>
+    <div class="est" id="est">10問ぶんを生成します（数分かかります）</div>
+
+    <button class="gen" id="genBtn" onclick="start()">▶ おでかけパックを 作る</button>
+
+    <div class="prog" id="prog">
+      <div class="bar"><div class="fill" id="fill"></div></div>
+      <div class="pmsg" id="pmsg">準備中…</div>
+    </div>
+
+    <div class="done" id="done">
+      <p style="font-weight:900;font-size:18px;color:var(--grass);margin-bottom:12px;">✅ できました！</p>
+      <a class="dl" id="dlBtn" href="#">⬇ ファイルを ダウンロード</a>
+    </div>
+
+    <div id="errbox"></div>
+
+    <div class="tip">
+      <b>iPadへの送り方</b><br>
+      ① 上のボタンでHTMLファイルをダウンロード<br>
+      ② AirDrop / メール / iCloud Drive などでiPadに送る<br>
+      ③ iPadのSafariかファイルアプリで開く（共有→ホーム画面に追加で“アプリ風”にも）<br>
+      ④ <b>ネット接続なしで10問</b>できます<br>
+      ※ 音声を埋め込むのでファイルは数MB〜になります
+    </div>
+  </div>
+</div>
+
+<script>
+let level='keio', count=10, poll=null;
+function setLv(lv){level=lv;
+  document.getElementById('lv-keio').classList.toggle('on',lv==='keio');
+  document.getElementById('lv-toin').classList.toggle('on',lv==='toin');}
+function addCount(d){count=Math.max(1,Math.min(20,count+d));
+  document.getElementById('count').textContent=count;
+  document.getElementById('est').textContent=count+'問ぶんを生成します（数分かかります）';}
+
+async function start(){
+  document.getElementById('errbox').innerHTML='';
+  document.getElementById('done').classList.remove('show');
+  document.getElementById('genBtn').disabled=true;
+  document.getElementById('prog').classList.add('show');
+  document.getElementById('fill').style.width='0%';
+  document.getElementById('pmsg').textContent='準備中…';
+  try{
+    const r=await fetch(`/api/pack/start?level=${level}&count=${count}`);
+    const d=await r.json();
+    if(d.error)throw new Error(d.error);
+    poll=setInterval(checkProgress,1500);
+  }catch(e){fail(e.message);}
+}
+
+async function checkProgress(){
+  try{
+    const r=await fetch('/api/pack/progress');
+    const p=await r.json();
+    if(p.total>0){
+      const pct=Math.round(p.done/p.total*100);
+      document.getElementById('fill').style.width=pct+'%';
+    }
+    document.getElementById('pmsg').textContent=`${p.msg}（${p.done}/${p.total}）`;
+    if(p.error){clearInterval(poll);fail(p.error);return;}
+    if(!p.running && p.file){
+      clearInterval(poll);
+      document.getElementById('fill').style.width='100%';
+      document.getElementById('pmsg').textContent='完成しました';
+      const dl=document.getElementById('dlBtn');
+      dl.href='/api/pack/download?file='+encodeURIComponent(p.file);
+      dl.setAttribute('download',p.file);
+      document.getElementById('done').classList.add('show');
+      document.getElementById('genBtn').disabled=false;
+    }
+  }catch(e){clearInterval(poll);fail(e.message);}
+}
+
+function fail(msg){
+  document.getElementById('errbox').innerHTML=`<div class="err">${msg}</div>`;
+  document.getElementById('genBtn').disabled=false;
+  document.getElementById('prog').classList.remove('show');
+}
+</script>
+</body>
+</html>
