@@ -8,6 +8,10 @@ packs/
 # 使用ログ
 usage_log.csv
 
+# ブラウザ自動操作の一時スクショ・認証状態
+.tmp_shots/
+auth.json
+
 # Python
 __pycache__/
 *.pyc
