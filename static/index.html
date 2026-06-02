@@ -124,22 +124,53 @@ function unlockAudio(){
   }catch(e){a.muted=false;}
 }
 
+// 音声の先読みキャッシュ（ボタンを押す前に裏で生成・取得しておき、再生を即時化する）
+let ttsCache={}, ttsUrls=[];
+function prefetchTTS(text){
+  if(!text) return Promise.reject(new Error('no text'));
+  if(ttsCache[text]) return ttsCache[text];
+  const p=fetch('/api/tts?text='+encodeURIComponent(text))
+    .then(r=>{ if(!r.ok){ return r.json().catch(()=>({})).then(j=>{throw new Error(j.error||('HTTP '+r.status));}); } return r.blob(); })
+    .then(blob=>{ const u=URL.createObjectURL(blob); ttsUrls.push(u); return u; })
+    .catch(e=>{ delete ttsCache[text]; throw e; });
+  ttsCache[text]=p; return p;
+}
+function clearTTSCache(){ ttsUrls.forEach(u=>{try{URL.revokeObjectURL(u);}catch(e){}}); ttsUrls=[]; ttsCache={}; }
+
 async function playTTS(text,btn){
   const a=ensurePlayer();
   a.pause();
   if(btn){btn.classList.add('playing');btn.disabled=true;const s=btn.querySelector('span');if(s)s.textContent='🔊';}
   const restore=()=>{if(btn){btn.classList.remove('playing');btn.disabled=false;const s=btn.querySelector('span');if(s)s.textContent='▶️';}};
   try{
-    const r=await fetch('/api/tts?text='+encodeURIComponent(text));
-    if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error||('HTTP '+r.status));}
-    const blob=await r.blob();
+    const url=await prefetchTTS(text);   // 先読み済みなら即時、未取得なら今取得
     a.muted=false;
-    a.src=URL.createObjectURL(blob);
+    a.src=url;
     a.onended=restore;
     await new Promise(res=>{a.oncanplaythrough=res;a.onerror=res;a.load();});
     a.currentTime=0;
     await a.play();
   }catch(e){restore();showError('音声の再生に失敗しました：'+e.message);}
+}
+
+// 正解のときだけ鳴らす「ピンポン♪」音（Web Audioで合成。音声ファイル不要）
+let _audioCtx=null;
+function playDing(){
+  try{
+    _audioCtx=_audioCtx||new (window.AudioContext||window.webkitAudioContext)();
+    if(_audioCtx.state==='suspended')_audioCtx.resume();
+    const ctx=_audioCtx, now=ctx.currentTime;
+    [[880,0],[1174.66,0.15]].forEach(([freq,t])=>{   // ピン→ポン（2音上がる）
+      const o=ctx.createOscillator(), g=ctx.createGain();
+      o.type='sine'; o.frequency.value=freq;
+      o.connect(g); g.connect(ctx.destination);
+      const s=now+t;
+      g.gain.setValueAtTime(0.0001,s);
+      g.gain.exponentialRampToValueAtTime(0.35,s+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001,s+0.32);
+      o.start(s); o.stop(s+0.36);
+    });
+  }catch(e){}
 }
 
 function showError(msg){
@@ -165,6 +196,7 @@ function showStart(){
 
 async function startStory(){
   unlockAudio();
+  clearTTSCache();
   stage.innerHTML=`<div class="loading"><span class="spin">🎡</span><p>おはなしを かんがえているよ…</p></div>`;
   try{
     const r=await fetch('/api/story?level='+state.level);
@@ -191,6 +223,9 @@ function showListen(){
     <button class="playbtn grey" onclick="goQuestions()">もんだいへ すすむ →</button>
     <div class="hint" id="listenHint">${state.honban?'※ 本番モード：再生は1回だけです':'※ 何度でも きけます'}</div>
   </div>`;
+  // この画面を開いた瞬間から、お話と最初の設問の音声を裏で先読み（押した時に即再生）
+  prefetchTTS(state.story).catch(()=>{});
+  if(state.questions&&state.questions[0])prefetchTTS(state.questions[0].q).catch(()=>{});
 }
 
 function onPlay(){
@@ -222,12 +257,15 @@ function showQuestion(){
     b.onclick=()=>answer(b,c.correct,wrap);wrap.appendChild(b);
   });
   setTimeout(()=>playTTS(q.q,null),300);
+  // 次の設問の音声を裏で先読みしておく（「つぎへ」で即再生）
+  const nq=state.questions[state.qIndex+1];
+  if(nq)prefetchTTS(nq.q).catch(()=>{});
 }
 
 function answer(btn,correct,wrap){
   if(wrap.dataset.done)return;wrap.dataset.done='1';
   const fb=document.getElementById('fb');
-  if(correct){btn.classList.add('correct');fb.textContent='せいかい！ ⭐';fb.className='feedback good';state.correctCount++;}
+  if(correct){btn.classList.add('correct');fb.textContent='せいかい！ ⭐';fb.className='feedback good';state.correctCount++;playDing();}
   else{btn.classList.add('wrong');fb.textContent='おしい！ ⭕のほうだよ';fb.className='feedback bad';
     const cb=[...wrap.children].find(el=>el.querySelector('.mark').textContent==='⭕');if(cb)cb.classList.add('correct');}
   document.getElementById('nextBtn').classList.add('show');
