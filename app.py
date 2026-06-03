@@ -387,6 +387,19 @@ def api_pack_download():
 def index():
     return send_from_directory(app.static_folder, "index.html")
 
+@app.route("/sw.js")
+def service_worker():
+    # Service Worker はルート直下から配信し、スコープを "/" にする（オフライン対応）
+    resp = send_from_directory(app.static_folder, "sw.js", mimetype="application/javascript")
+    resp.headers["Service-Worker-Allowed"] = "/"
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+@app.route("/manifest.webmanifest")
+def manifest():
+    return send_from_directory(app.static_folder, "manifest.webmanifest",
+                               mimetype="application/manifest+json")
+
 @app.route("/compare")
 def compare():
     return send_from_directory(app.static_folder, "compare.html")
