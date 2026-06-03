@@ -81,26 +81,28 @@ LEVEL_SPEC = {
 
 # 実際の小学校受験「お話の記憶」で出題される設問パターン（ネット上の過去問・プロ解説を調査して作成）
 # 毎回ここからランダムに選ぶことで、出題の偏り（色×動物・人×持ち物に集中）を防ぐ。
+# key=苦手分析のカテゴリー識別子（設問ごとに type として出力させ集計に使う）
 QUESTION_PATTERNS = [
-    "数を問う（いくつ拾った・何個・何人・何匹）",
-    "色を問う（風船・服・花・持ち物などの色）",
-    "出てきた順番／何番目かを問う（最初に・2番目に・最後に出てきたのは）",
-    "誰が何をしたか（人物と行動の対応。例：かけっこで転んだのは誰）",
-    "誰が何を持っていたか（持ち物と人物の対応）",
-    "どこへ行ったか・どこにあったか（場所・目的地。例：山か湖か）",
-    "何に乗って行ったか（乗り物・移動手段）",
-    "このお話の季節はいつか（春夏秋冬。手がかりは情景に自然に入れる）",
-    "そのときの天気はどうだったか（晴れ・くもり・雨・雪）",
-    "登場人物の気持ち・表情を問う（その場面の出来事に合った気持ち。うれしい・かなしい・びっくり・こわい・おこった・ざんねん・あんしん等から毎回ちがう気持ちを選び『うれしい』に偏らせない。選択肢は4つの顔の絵文字😊😢😮😠など）",
-    "誰が何を食べた／飲んだか・好き嫌い（食べたい物／食べたくない物）",
-    "登場人物の服装の特徴（帽子・くつ・かばんなどの色や種類）",
-    "位置関係を問う（列のまんなか・先頭は誰か／誰のとなりに座ったか／かばんや棚の中で何のとなり・上下に置いたか等。お話の中で実際にはっきり述べた配置だけを問い、『雪だるまの頭はどこ→上』のように当たり前すぎる・自明な問いは絶対に作らない）",
-    "お話に出てこなかったものはどれか（3つは登場、1つだけ登場しない）",
-    "数の変化を問う（増えた・減った・残りはいくつ・合計でいくつ）",
-    "誰が何と言ったか・どんな約束をしたか",
-    "時間帯を問う（朝・昼・夜）または何曜日か",
-    "季節の行事・イベント（ひな祭り・節分・運動会・お月見など）",
+    {"key": "数",        "desc": "数を問う（いくつ拾った・何個・何人・何匹）"},
+    {"key": "色",        "desc": "色を問う（風船・服・花・持ち物などの色）"},
+    {"key": "順番",      "desc": "出てきた順番／何番目かを問う（最初に・2番目に・最後に出てきたのは）"},
+    {"key": "人物と行動", "desc": "誰が何をしたか（人物と行動の対応。例：かけっこで転んだのは誰）"},
+    {"key": "持ち物",    "desc": "誰が何を持っていたか（持ち物と人物の対応）"},
+    {"key": "場所",      "desc": "どこへ行ったか・どこにあったか（場所・目的地。例：山か湖か）"},
+    {"key": "乗り物",    "desc": "何に乗って行ったか（乗り物・移動手段）"},
+    {"key": "季節",      "desc": "このお話の季節はいつか（春夏秋冬。手がかりは情景に自然に入れる）"},
+    {"key": "天気",      "desc": "そのときの天気はどうだったか（晴れ・くもり・雨・雪）"},
+    {"key": "気持ち",    "desc": "登場人物の気持ち・表情を問う（その場面の出来事に合った気持ち。うれしい・かなしい・びっくり・こわい・おこった・ざんねん・あんしん等から毎回ちがう気持ちを選び『うれしい』に偏らせない。選択肢は4つの顔の絵文字😊😢😮😠など）"},
+    {"key": "食べ物",    "desc": "誰が何を食べた／飲んだか・好き嫌い（食べたい物／食べたくない物）"},
+    {"key": "服装",      "desc": "登場人物の服装の特徴（帽子・くつ・かばんなどの色や種類）"},
+    {"key": "位置",      "desc": "位置関係を問う（列のまんなか・先頭は誰か／誰のとなりに座ったか／かばんや棚の中で何のとなり・上下に置いたか等。お話の中で実際にはっきり述べた配置だけを問い、『雪だるまの頭はどこ→上』のように当たり前すぎる・自明な問いは絶対に作らない）"},
+    {"key": "出てこない", "desc": "お話に出てこなかったものはどれか（3つは登場、1つだけ登場しない）"},
+    {"key": "数の変化",  "desc": "数の変化を問う（増えた・減った・残りはいくつ・合計でいくつ）"},
+    {"key": "発言",      "desc": "誰が何と言ったか・どんな約束をしたか"},
+    {"key": "時間",      "desc": "時間帯を問う（朝・昼・夜）または何曜日か"},
+    {"key": "行事",      "desc": "季節の行事・イベント（ひな祭り・節分・運動会・お月見など）"},
 ]
+PATTERN_BY_KEY = {p["key"]: p for p in QUESTION_PATTERNS}
 
 # お話の舞台・題材。毎回ここからランダムに1つ選び、公園・動物園への偏りを防ぐ。
 STORY_THEMES = [
@@ -130,19 +132,26 @@ EMOTION_TARGETS = [
     "ざんねん・がっかり", "ほっとした・あんしん", "わくわく・たのしみ", "はずかしい",
 ]
 
-def build_prompt(level: str) -> str:
+def build_prompt(level: str, focus=None) -> str:
     spec = LEVEL_SPEC.get(level, LEVEL_SPEC["keio"])
     n_q = 5 if level == "keio" else 4
-    # 毎回ちがうパターンの組み合わせを選ぶ（重複なし）
-    chosen = random.sample(QUESTION_PATTERNS, n_q)
+    # 苦手練習(focus)指定があればそのカテゴリーを優先採用、足りない分はランダム補充
+    if focus:
+        chosen = [PATTERN_BY_KEY[k] for k in focus if k in PATTERN_BY_KEY][:n_q]
+        if len(chosen) < n_q:
+            rest = [p for p in QUESTION_PATTERNS if p not in chosen]
+            chosen += random.sample(rest, n_q - len(chosen))
+    else:
+        chosen = random.sample(QUESTION_PATTERNS, n_q)
+    random.shuffle(chosen)
     lines = []
     for i, p in enumerate(chosen):
         extra = ""
         # 気持ちパターンは「うれしい」偏りを防ぐため、毎回ちがう目標感情を指定する
-        if p.startswith("登場人物の気持ち"):
+        if p["key"] == "気持ち":
             target = random.choice(EMOTION_TARGETS)
             extra = f"（今回は主人公が『{target}』という気持ちになる出来事をお話に自然に入れて、その気持ちを問う。正解は『{target}』系にする）"
-        lines.append(f"  ・設問{i+1}は「{p}」のパターンで出す。{extra}")
+        lines.append(f"  ・設問{i+1}は「{p['desc']}」のパターンで出す。type は \"{p['key']}\"。{extra}")
     patterns_text = "\n".join(lines)
     # 毎回ちがう舞台・主人公を選ぶ（公園・動物園への偏りを防ぐ）
     theme = random.choice(STORY_THEMES)
@@ -168,12 +177,15 @@ def build_prompt(level: str) -> str:
 - 【重要】設問は、お話の中で実際に・はっきり描写された“思い出す価値のある”事実だけを問う。指定パターンを無理に当てはめて、当たり前すぎる問いや不自然な問い（例：「雪だるまの頭はどこ→上」）は作らない。そのパターンが今回のお話に自然に作れない場合は、お話の方に手がかりとなる場面を自然に足してから問う。
 - 気持ちを問う設問は、その出来事に本当に合う気持ちにし、毎回同じ（特に「うれしい」）に偏らせない。
 
+各設問には、上で指定した type（カテゴリー識別子。例: 数・色・順番・気持ち・位置 など）を必ず付けること。
+
 必ず以下のJSON形式のみで出力。前後の説明やマークダウン、コードフェンスは一切付けない:
 {{
   "story": "お話の本文。読み上げる文章をそのまま。",
   "questions": [
     {{
       "q": "設問文",
+      "type": "数",
       "choices": [
         {{"emoji":"🍎","label":"りんご","correct":true}},
         {{"emoji":"🍌","label":"バナナ","correct":false}},
@@ -184,7 +196,7 @@ def build_prompt(level: str) -> str:
   ]
 }}"""
 
-def generate_story(level: str) -> dict:
+def generate_story(level: str, focus=None) -> dict:
     """Anthropic APIで問題1セットを生成して dict を返す。失敗時は例外。"""
     r = requests.post(
         "https://api.anthropic.com/v1/messages",
@@ -196,7 +208,7 @@ def generate_story(level: str) -> dict:
         json={
             "model": "claude-sonnet-4-20250514",
             "max_tokens": 1500,
-            "messages": [{"role": "user", "content": build_prompt(level)}],
+            "messages": [{"role": "user", "content": build_prompt(level, focus)}],
         },
         timeout=60,
     )
@@ -209,10 +221,12 @@ def generate_story(level: str) -> dict:
 @app.route("/api/story")
 def api_story():
     level = request.args.get("level", "keio")
+    # 苦手練習: focus=順番,位置 のようにカテゴリーを指定するとそのパターンを優先出題
+    focus = [k.strip() for k in (request.args.get("focus", "") or "").split(",") if k.strip()]
     if not ANTHROPIC_API_KEY:
         return jsonify({"error": ".env に ANTHROPIC_API_KEY を設定してください"}), 400
     try:
-        parsed = generate_story(level)
+        parsed = generate_story(level, focus or None)
         return jsonify(parsed)
     except Exception as e:
         return jsonify({"error": f"問題生成に失敗しました: {e}"}), 500
@@ -225,41 +239,54 @@ def log_usage(kind: str, chars: int, cached: bool):
             f.write("datetime,kind,chars,cached\n")
         f.write(f"{datetime.datetime.now().isoformat()},{kind},{chars},{int(cached)}\n")
 
-def synth(text, voice_id, model_id):
-    """ElevenLabsで音声生成。(bytes, from_cache) を返す。失敗時は例外。"""
-    key = hashlib.md5(f"{voice_id}:{model_id}:{text}".encode("utf-8")).hexdigest()
+def synth(text, voice_id, model_id, speed=1.0):
+    """ElevenLabsで音声生成。(bytes, from_cache) を返す。失敗時は例外。speedは0.7〜1.2。"""
+    try:
+        speed = float(speed)
+    except (TypeError, ValueError):
+        speed = 1.0
+    speed = max(0.7, min(1.2, speed))
+    # speedごとに別キャッシュ（速度を変えても正しく作り分ける）
+    key = hashlib.md5(f"{voice_id}:{model_id}:{speed}:{text}".encode("utf-8")).hexdigest()
     cache_path = AUDIO_DIR / f"{key}.mp3"
     if cache_path.exists():
         log_usage("story" if len(text) > 60 else "question", len(text), True)
         return cache_path.read_bytes(), True
 
+    voice_settings = {
+        "stability": 0.80,
+        "similarity_boost": 0.70,
+        "style": 0.0,
+        "use_speaker_boost": True,
+    }
+    # 等速(1.0)のときは speed を送らない（非対応モデルでのエラーを避ける）
+    if abs(speed - 1.0) > 0.001:
+        voice_settings["speed"] = speed
     payload = {
         "text": text,
         "model_id": model_id,
         # 日本語を明示して誤読・言語誤認を抑える
         "language_code": "ja",
         # 試験官の落ち着いた読み聞かせに寄せる：安定性高め・抑揚控えめ
-        "voice_settings": {
-            "stability": 0.80,
-            "similarity_boost": 0.70,
-            "style": 0.0,
-            "use_speaker_boost": True,
-        },
+        "voice_settings": voice_settings,
     }
-    r = requests.post(
-        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-        headers={"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json"},
-        json=payload,
-        timeout=90,
-    )
+
+    def _post(pl):
+        return requests.post(
+            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+            headers={"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json"},
+            json=pl, timeout=90,
+        )
+
+    r = _post(payload)
     # language_code 非対応モデルの場合に備えてリトライ
     if r.status_code >= 400 and "language_code" in (r.text or ""):
         payload.pop("language_code", None)
-        r = requests.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-            headers={"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json"},
-            json=payload, timeout=90,
-        )
+        r = _post(payload)
+    # speed 非対応モデルの場合に備えてリトライ（speedを外す）
+    if r.status_code >= 400 and "speed" in (r.text or "") and "speed" in payload["voice_settings"]:
+        payload["voice_settings"].pop("speed", None)
+        r = _post(payload)
     r.raise_for_status()
     cache_path.write_bytes(r.content)
     log_usage("story" if len(text) > 60 else "question", len(text), False)
@@ -268,12 +295,13 @@ def synth(text, voice_id, model_id):
 @app.route("/api/tts")
 def api_tts():
     text = (request.args.get("text") or "").strip()
+    speed = request.args.get("speed", "1.0")
     if not text:
         return jsonify({"error": "text がありません"}), 400
     if not ELEVENLABS_API_KEY:
         return jsonify({"error": ".env に ELEVENLABS_API_KEY を設定してください"}), 400
     try:
-        audio, _ = synth(text, ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL)
+        audio, _ = synth(text, ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL, speed)
         return Response(audio, mimetype="audio/mpeg")
     except Exception as e:
         return jsonify({"error": f"音声生成に失敗しました: {e}"}), 500

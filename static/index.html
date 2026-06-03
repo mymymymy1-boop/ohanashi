@@ -106,7 +106,21 @@
 </div>
 
 <script>
-const state={level:'keio',story:'',questions:[],qIndex:0,correctCount:0,honban:false,currentId:null,offline:false};
+const state={level:'keio',story:'',questions:[],qIndex:0,correctCount:0,honban:false,currentId:null,offline:false,speed:1.0,focus:null};
+// 読み上げ速度をローカルに記憶
+try{const sp=parseFloat(localStorage.getItem('ohanashi-speed'));if(sp)state.speed=sp;}catch(e){}
+const SPEEDS=[{k:'ゆっくり',v:0.8},{k:'ふつう',v:1.0},{k:'はやい',v:1.15}];
+function setSpeed(v){state.speed=v;try{localStorage.setItem('ohanashi-speed',String(v));}catch(e){}clearTTSCache();showStart();}
+
+// ===== 苦手分析（設問パターン別の正答率を記録）=====
+function loadStats(){try{return JSON.parse(localStorage.getItem('ohanashi-stats')||'{}');}catch(e){return {};}}
+function recordStat(type,correct){
+  if(!type)return;
+  const s=loadStats();
+  if(!s[type])s[type]={n:0,ok:0};
+  s[type].n++; if(correct)s[type].ok++;
+  try{localStorage.setItem('ohanashi-stats',JSON.stringify(s));}catch(e){}
+}
 const stage=document.getElementById('stage');
 let currentAudio=null;
 
@@ -121,7 +135,7 @@ async function dbDel(id){const db=await _idb();return new Promise((res,rej)=>{co
 
 // 音声をbase64データURLで取得（端末保存用＝完全オフライン再生のため）
 async function fetchAudioB64(text){
-  const r=await fetch('/api/tts?text='+encodeURIComponent(text));
+  const r=await fetch('/api/tts?text='+encodeURIComponent(text)+'&speed='+state.speed);
   if(!r.ok)throw new Error('tts '+r.status);
   const blob=await r.blob();
   return await new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=()=>rej(fr.error);fr.readAsDataURL(blob);});
@@ -129,7 +143,7 @@ async function fetchAudioB64(text){
 // お話を作った時点で保存（未解決として）。音声は裏でまとめて端末に保存。
 async function saveProblemRecord(){
   const rec={id:state.currentId,level:state.level,levelName:(state.level==='keio'?'慶應横浜':'桐蔭学園'),
-    createdAt:Date.now(),solved:false,score:null,total:state.questions.length,
+    createdAt:Date.now(),solved:false,score:null,total:state.questions.length,speed:state.speed,
     story:state.story,questions:state.questions,storyAudio:null,qAudios:[]};
   try{await dbPut(rec);}catch(e){}
   bgCacheAudio(state.currentId);  // 背景で音声を保存
@@ -172,7 +186,7 @@ let ttsCache={}, ttsUrls=[];
 function prefetchTTS(text){
   if(!text) return Promise.reject(new Error('no text'));
   if(ttsCache[text]) return ttsCache[text];
-  const p=fetch('/api/tts?text='+encodeURIComponent(text))
+  const p=fetch('/api/tts?text='+encodeURIComponent(text)+'&speed='+state.speed)
     .then(r=>{ if(!r.ok){ return r.json().catch(()=>({})).then(j=>{throw new Error(j.error||('HTTP '+r.status));}); } return r.blob(); })
     .then(blob=>{ const u=URL.createObjectURL(blob); ttsUrls.push(u); return u; })
     .catch(e=>{ delete ttsCache[text]; throw e; });
@@ -224,6 +238,7 @@ function showError(msg){
 function showStart(){
   stopAudio();
   const lvName=state.level==='keio'?'慶應横浜':'桐蔭学園';
+  const speedHtml=SPEEDS.map(s=>`<button onclick="setSpeed(${s.v})" style="flex:1;border:none;border-radius:14px;padding:9px 4px;font-family:inherit;font-weight:700;font-size:13px;cursor:pointer;${state.speed===s.v?'background:var(--sun);color:#fff;box-shadow:0 3px 0 #e09a10;':'background:#f3ead6;color:#a8967a;'}">${s.k}</button>`).join('');
   stage.innerHTML=`<div class="listen">
     <div class="bigicon">📖</div>
     <h2>${lvName}レベル</h2>
@@ -232,7 +247,12 @@ function showStart(){
     <div class="toggle"><input type="checkbox" id="honban" ${state.honban?'checked':''} onchange="state.honban=this.checked">
       <label for="honban">本番モード（お話は1回だけ）</label></div>
     <div class="hint">本番モードは、慣れてきたら ON にすると<br>実際の試験に近い練習ができます</div>
-    <button class="playbtn grey" style="margin-top:18px;" onclick="showLibrary()"><span>📚</span> ほぞんした おはなし</button>
+    <div style="margin-top:16px;">
+      <div style="font-size:12px;color:#9a8a72;font-weight:700;margin-bottom:6px;">よみあげの はやさ</div>
+      <div style="display:flex;gap:8px;">${speedHtml}</div>
+    </div>
+    <button class="playbtn grey" style="margin-top:18px;" onclick="showStats()"><span>📊</span> にがて ぶんせき</button>
+    <button class="playbtn grey" style="margin-top:10px;" onclick="showLibrary()"><span>📚</span> ほぞんした おはなし</button>
     <a href="/compare" style="display:inline-block;margin-top:14px;color:#9b7ede;font-weight:700;font-size:13px;text-decoration:none;">🎙️ 声くらべ（本番の声を決める）→</a>
     <a href="/pack" style="display:block;margin-top:10px;color:#7dc95e;font-weight:700;font-size:13px;text-decoration:none;">🎒 おでかけパックを作る（オフライン用）→</a>
   </div>`;
@@ -274,7 +294,7 @@ async function openSaved(id){
   if(!rec){showLibrary();return;}
   state.level=rec.level;state.story=rec.story;state.questions=rec.questions;
   state.qIndex=0;state.correctCount=0;state.playedOnce=false;state.honban=false;
-  state.currentId=rec.id;state.offline=true;
+  state.currentId=rec.id;state.offline=true;state.speed=rec.speed||1.0;
   unlockAudio();
   clearTTSCache();
   // 端末に保存した音声をキャッシュに載せる（オフラインでもそのまま再生できる）
@@ -288,12 +308,50 @@ async function delSaved(id){
   showLibrary();
 }
 
-async function startStory(){
+function showStats(){
+  stopAudio();
+  const s=loadStats();
+  const rows=Object.keys(s).map(k=>({k,n:s[k].n,ok:s[k].ok,rate:s[k].n?Math.round(s[k].ok/s[k].n*100):0}))
+    .filter(r=>r.n>0).sort((a,b)=>a.rate-b.rate||b.n-a.n);
+  let body;
+  if(!rows.length){
+    body=`<p style="font-size:13px;color:#9a8a72;line-height:1.7;">まだ きろくが ないよ。<br>もんだいを といていくと、どの しゅるいが にがてか わかるよ。</p>`;
+  }else{
+    body=rows.map(r=>{
+      const col=r.rate>=80?'#7dc95e':r.rate>=50?'#ffb627':'#ef6f6c';
+      return `<div style="text-align:left;margin-bottom:11px;">
+        <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;color:#6a5e4e;">
+          <span>${r.k}</span><span style="color:${col};">${r.rate}%（${r.ok}/${r.n}）</span></div>
+        <div style="height:10px;background:#f3ead6;border-radius:6px;overflow:hidden;margin-top:3px;">
+          <div style="height:100%;width:${r.rate}%;background:${col};transition:.3s;"></div></div>
+      </div>`;
+    }).join('');
+  }
+  const weak=rows.filter(r=>r.n>=2&&r.rate<70).slice(0,2).map(r=>r.k);
+  const practiceBtn=weak.length
+    ? `<button class="playbtn" style="margin-top:8px;" onclick="practiceWeak('${weak.join(',')}')"><span>💪</span> にがてを れんしゅう</button>
+       <div class="hint">（${weak.join('・')} を おおめに 出すよ）</div>`
+    : '';
+  stage.innerHTML=`<div style="text-align:center;">
+    <div class="bigicon" style="font-size:54px;">📊</div>
+    <h2 style="font-size:20px;font-weight:900;margin:8px 0;">にがて ぶんせき</h2>
+    <p style="font-size:12px;color:#9a8a72;margin-bottom:14px;">せいかいりつが ひくい じゅんに ならんでいるよ</p>
+    <div style="max-height:46vh;overflow-y:auto;padding:2px;">${body}</div>
+    ${practiceBtn}
+    <button class="playbtn grey" style="margin-top:12px;" onclick="showStart()"><span>←</span> もどる</button>
+  </div>`;
+}
+function practiceWeak(s){ startStory(s.split(',')); }
+
+async function startStory(focus){
+  state.focus=(focus&&focus.length)?focus:null;
   unlockAudio();
   clearTTSCache();
   stage.innerHTML=`<div class="loading"><span class="spin">🎡</span><p>おはなしを かんがえているよ…</p></div>`;
   try{
-    const r=await fetch('/api/story?level='+state.level);
+    let url='/api/story?level='+state.level;
+    if(state.focus)url+='&focus='+encodeURIComponent(state.focus.join(','));
+    const r=await fetch(url);
     const data=await r.json();
     if(data.error)throw new Error(data.error);
     state.story=data.story;state.questions=data.questions;
@@ -361,6 +419,7 @@ function showQuestion(){
 
 function answer(btn,correct,wrap){
   if(wrap.dataset.done)return;wrap.dataset.done='1';
+  recordStat((state.questions[state.qIndex]||{}).type, correct);  // 苦手分析用に記録
   const fb=document.getElementById('fb');
   if(correct){btn.classList.add('correct');fb.textContent='せいかい！ ⭐';fb.className='feedback good';state.correctCount++;playDing();}
   else{btn.classList.add('wrong');fb.textContent='おしい！ ⭕のほうだよ';fb.className='feedback bad';
