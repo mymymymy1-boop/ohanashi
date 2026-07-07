@@ -12,13 +12,20 @@ services:
     # おでかけパックは生成後すぐにダウンロードすること（再起動で成果物が消えるため）。
     plan: free
     buildCommand: pip install -r requirements.txt
-    # timeout はリトライ最悪ケース（Anthropic 60秒×3回＋バックオフ≒190秒）より長くする
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 240
+    # timeout はリトライ最悪ケース（Anthropic 60秒×3回＋バックオフ≒190秒）より長くする。
+    # --preload: 起動時にインポート/設定エラー（APP_PASSWORD未設定の停止など）を即検知。
+    # --max-requests: ワーカーを定期リサイクルしメモリ肥大を防ぐ。
+    # --graceful-timeout: デプロイ時に進行中の長時間リクエストを途中切断しない。
+    # --limit-request-line: 長いお話を /api/tts の GET クエリで送っても 414 にならないよう拡大。
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 240 --graceful-timeout 120 --max-requests 800 --max-requests-jitter 80 --limit-request-line 16380 --preload
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
       - key: ANTHROPIC_API_KEY
         sync: false        # ← ダッシュボードで入力
+      - key: ANTHROPIC_MODEL
+        value: ""          # 空なら claude-sonnet-4-6 → claude-sonnet-4-5 の順に自動選択。
+                           # モデル提供終了時はここにモデルIDを入れて Save すれば再デプロイなしで復旧できる。
       - key: ELEVENLABS_API_KEY
         sync: false        # ← ダッシュボードで入力
       - key: ELEVENLABS_VOICE_ID

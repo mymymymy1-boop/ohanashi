@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>おはなしのきおく｜小学校受験れんしゅう</title>
 <meta name="theme-color" content="#ffb627">
 <link rel="manifest" href="/manifest.webmanifest">
@@ -17,7 +17,7 @@
     --bg:#fef6e4;--paper:#fffdf7;--ink:#4a3f35;--sun:#ffb627;--sky:#6ec6e8;
     --grass:#7dc95e;--berry:#ef6f6c;--grape:#9b7ede;--line:#e8dcc4;--shadow:rgba(120,90,40,.18);
   }
-  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}
   html,body{height:100%;}
   body{font-family:'Zen Maru Gothic','Kosugi Maru',sans-serif;
     background:radial-gradient(circle at 12% 18%,#fff3d6 0 6%,transparent 6.5%),
@@ -107,6 +107,9 @@
 
 <script>
 const state={level:'keio',story:'',questions:[],qIndex:0,correctCount:0,honban:false,currentId:null,offline:false,speed:1.0,focus:null};
+// レベルの表示名（ボタン文言と揃える。追加・改名はここ1箇所）
+const LEVEL_NAMES={keio:'慶應横浜',toin:'桐蔭学園'};
+function lvName(lv){return LEVEL_NAMES[lv]||lv;}
 // 読み上げ速度をローカルに記憶
 try{const sp=parseFloat(localStorage.getItem('ohanashi-speed'));if(sp)state.speed=sp;}catch(e){}
 const SPEEDS=[{k:'ゆっくり',v:0.8},{k:'ふつう',v:1.0},{k:'はやい',v:1.15}];
@@ -123,6 +126,14 @@ function recordStat(type,correct){
 }
 const stage=document.getElementById('stage');
 let currentAudio=null;
+// 再生トークン：新しい再生/停止のたびに++。await後に自分が最新でなければ中断する（音声の横取り防止）。
+let playSeq=0, qTimer=null;
+// LLM生成テキストをinnerHTMLに入れる箇所のエスケープ（描画破綻・DOM注入の防止）
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+// 公平なシャッフル（Fisher-Yates。sort(random)は並びが偏るため）
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+// 本番モード判定（保存問題の再生中は1回制限を無効化する＝replayUnlimited）
+function isHonban(){return state.honban&&!state.replayUnlimited;}
 
 // ===== オフライン保存（IndexedDB）：解いた/未解決の問題を端末に貯める =====
 function _idb(){return new Promise((res,rej)=>{const rq=indexedDB.open('ohanashi-db',1);
@@ -133,31 +144,55 @@ async function dbAll(){const db=await _idb();return new Promise((res,rej)=>{cons
 async function dbGet(id){const db=await _idb();return new Promise((res,rej)=>{const rq=db.transaction('problems','readonly').objectStore('problems').get(id);rq.onsuccess=()=>res(rq.result);rq.onerror=()=>rej(rq.error);});}
 async function dbDel(id){const db=await _idb();return new Promise((res,rej)=>{const tx=db.transaction('problems','readwrite');tx.objectStore('problems').delete(id);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);});}
 
-// 音声をbase64データURLで取得（端末保存用＝完全オフライン再生のため）
-async function fetchAudioB64(text){
-  const r=await fetch('/api/tts?text='+encodeURIComponent(text)+'&speed='+state.speed);
+// 音声をbase64データURLで取得（端末保存用＝完全オフライン再生のため）。
+// 保存時の速度で取る（保存中に速度を変えても音と設定がズレないよう speed を明示的に渡す）。
+async function fetchAudioB64(text,speed){
+  const sp=(speed==null?state.speed:speed);
+  const r=await fetch('/api/tts?text='+encodeURIComponent(text)+'&speed='+sp);
   if(!r.ok)throw new Error('tts '+r.status);
   const blob=await r.blob();
   return await new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=()=>rej(fr.error);fr.readAsDataURL(blob);});
 }
+const SAVE_LIMIT=50;  // 端末に貯める問題の上限（base64音声つきで肥大するため、古い順に自動削除）
+async function pruneSaved(){
+  try{
+    const recs=await dbAll();
+    if(recs.length<=SAVE_LIMIT)return;
+    recs.sort((a,b)=>a.createdAt-b.createdAt);
+    for(const r of recs.slice(0,recs.length-SAVE_LIMIT)){try{await dbDel(r.id);}catch(e){}}
+  }catch(e){console.warn('pruneSaved failed',e);}
+}
 // お話を作った時点で保存（未解決として）。音声は裏でまとめて端末に保存。
 async function saveProblemRecord(){
-  const rec={id:state.currentId,level:state.level,levelName:(state.level==='keio'?'慶應横浜':'桐蔭学園'),
+  const rec={id:state.currentId,level:state.level,levelName:lvName(state.level),
     createdAt:Date.now(),solved:false,score:null,total:state.questions.length,speed:state.speed,
     story:state.story,questions:state.questions,storyAudio:null,qAudios:[]};
-  try{await dbPut(rec);}catch(e){}
+  try{await dbPut(rec);await pruneSaved();}catch(e){console.warn('saveProblemRecord failed',e);}
   bgCacheAudio(state.currentId);  // 背景で音声を保存
 }
+// 音声を1本取得するたびに最新レコードを読み直してから書き戻す（markSolved等の並行更新を上書きしないため）。
 async function bgCacheAudio(id){
   try{
     let rec=await dbGet(id);if(!rec)return;
-    if(!rec.storyAudio){try{rec.storyAudio=await fetchAudioB64(rec.story);await dbPut(rec);}catch(e){}}
-    rec.qAudios=rec.qAudios||[];
-    for(let i=0;i<rec.questions.length;i++){if(!rec.qAudios[i]){try{rec.qAudios[i]=await fetchAudioB64(rec.questions[i].q);await dbPut(rec);}catch(e){}}}
-  }catch(e){}
+    const sp=rec.speed;
+    if(!rec.storyAudio){
+      try{const a=await fetchAudioB64(rec.story,sp);rec=await dbGet(id);if(!rec)return;rec.storyAudio=a;await dbPut(rec);}
+      catch(e){console.warn('story audio cache failed',e);}
+    }
+    const n=(rec.questions||[]).length;
+    for(let i=0;i<n;i++){
+      rec.qAudios=rec.qAudios||[];
+      if(!rec.qAudios[i]){
+        try{const a=await fetchAudioB64(rec.questions[i].q,sp);rec=await dbGet(id);if(!rec)return;rec.qAudios=rec.qAudios||[];rec.qAudios[i]=a;await dbPut(rec);}
+        catch(e){console.warn('q audio cache failed',e);}
+      }
+    }
+  }catch(e){console.warn('bgCacheAudio failed',e);}
 }
 async function markSolved(){
-  try{const rec=await dbGet(state.currentId);if(rec){rec.solved=true;rec.score=state.correctCount;rec.total=state.questions.length;await dbPut(rec);}}catch(e){}
+  // await を跨ぐと state が次のお話に変わりうるので、先にローカルへ確定させる。
+  const id=state.currentId,score=state.correctCount,total=state.questions.length;
+  try{const rec=await dbGet(id);if(rec){rec.solved=true;rec.score=score;rec.total=total;await dbPut(rec);}}catch(e){console.warn('markSolved failed',e);}
 }
 
 function setLevel(lv){state.level=lv;
@@ -165,7 +200,7 @@ function setLevel(lv){state.level=lv;
   document.getElementById('lv-toin').classList.toggle('on',lv==='toin');
   showStart();}
 
-function stopAudio(){if(currentAudio){currentAudio.pause();}}
+function stopAudio(){playSeq++;if(qTimer){clearTimeout(qTimer);qTimer=null;}if(currentAudio){currentAudio.pause();}}
 
 function ensurePlayer(){
   if(!currentAudio){currentAudio=new Audio();currentAudio.setAttribute('playsinline','');}
@@ -194,20 +229,25 @@ function prefetchTTS(text){
 }
 function clearTTSCache(){ ttsUrls.forEach(u=>{try{URL.revokeObjectURL(u);}catch(e){}}); ttsUrls=[]; ttsCache={}; }
 
+// 再生開始できたら true、失敗/横取りされたら false を返す（例外は投げない）。
 async function playTTS(text,btn){
   const a=ensurePlayer();
   a.pause();
+  const myseq=++playSeq;   // この再生の通し番号。await中に新しい再生/停止が来たら中断する。
   if(btn){btn.classList.add('playing');btn.disabled=true;const s=btn.querySelector('span');if(s)s.textContent='🔊';}
   const restore=()=>{if(btn){btn.classList.remove('playing');btn.disabled=false;const s=btn.querySelector('span');if(s)s.textContent='▶️';}};
   try{
     const url=await prefetchTTS(text);   // 先読み済みなら即時、未取得なら今取得
+    if(myseq!==playSeq){restore();return false;}   // 取得中に別の再生/停止が来た→この再生は破棄
     a.muted=false;
     a.src=url;
     a.onended=restore;
     await new Promise(res=>{a.oncanplaythrough=res;a.onerror=res;a.load();});
+    if(myseq!==playSeq){restore();return false;}
     a.currentTime=0;
     await a.play();
-  }catch(e){restore();showError('音声の再生に失敗しました：'+e.message);}
+    return true;
+  }catch(e){restore();showError('おとが でなかったよ。もういちど おしてね');return false;}
 }
 
 // 正解のときだけ鳴らす「ピンポン♪」音（Web Audioで合成。音声ファイル不要）
@@ -231,17 +271,19 @@ function playDing(){
 }
 
 function showError(msg){
-  const d=document.createElement('div');d.className='err';d.textContent=msg;
-  stage.appendChild(d);
+  // エラーは積み重ねず、既存の表示を置き換える（連打・毎問失敗でカードが埋まらないように）
+  let d=stage.querySelector('.err');
+  if(!d){d=document.createElement('div');d.className='err';stage.appendChild(d);}
+  d.textContent=msg;
 }
 
 function showStart(){
   stopAudio();
-  const lvName=state.level==='keio'?'慶應横浜':'桐蔭学園';
+  const lvLabel=lvName(state.level);
   const speedHtml=SPEEDS.map(s=>`<button onclick="setSpeed(${s.v})" style="flex:1;border:none;border-radius:14px;padding:9px 4px;font-family:inherit;font-weight:700;font-size:13px;cursor:pointer;${state.speed===s.v?'background:var(--sun);color:#fff;box-shadow:0 3px 0 #e09a10;':'background:#f3ead6;color:#a8967a;'}">${s.k}</button>`).join('');
   stage.innerHTML=`<div class="listen">
     <div class="bigicon">📖</div>
-    <h2>${lvName}レベル</h2>
+    <h2>${lvLabel}レベル</h2>
     <p>あたらしい おはなしを つくるよ。<br>ボタンを おして はじめよう！</p>
     <button class="playbtn" onclick="startStory()"><span>✨</span> おはなしを つくる</button>
     <div class="toggle"><input type="checkbox" id="honban" ${state.honban?'checked':''} onchange="state.honban=this.checked">
@@ -266,11 +308,14 @@ async function showLibrary(){
     const badge=r.solved
       ? `<span style="background:#eefae6;color:#5fa844;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:700;">✅ といた ${r.score}/${r.total}</span>`
       : `<span style="background:#fff3d6;color:#d99a10;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:700;">🆕 みかいとう</span>`;
-    const snip=(r.story||'').slice(0,28)+'…';
+    // 音声が全部そろっているか（そろっていない問題はオフラインでは音が出ないので印を出す）
+    const ready=r.storyAudio&&(r.qAudios||[]).filter(Boolean).length>=(r.questions||[]).length;
+    const readyBadge=ready?'':`<span style="background:#eef2fb;color:#6a7bb5;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;margin-left:6px;">🔊 じゅんびちゅう</span>`;
+    const snip=esc((r.story||'').slice(0,28))+'…';
     const d=new Date(r.createdAt); const dt=`${d.getMonth()+1}/${d.getDate()}`;
     return `<div style="background:#fff;border:2px solid var(--line);border-radius:18px;padding:12px 14px;margin-bottom:10px;text-align:left;box-shadow:0 4px 0 var(--line);">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-        <span style="font-size:12px;font-weight:700;color:#a8967a;">${r.levelName}・${dt}</span>${badge}
+        <span style="font-size:12px;font-weight:700;color:#a8967a;">${esc(r.levelName)}・${dt}</span><span>${badge}${readyBadge}</span>
       </div>
       <div style="font-size:13px;color:#6a5e4e;margin:8px 0 10px;line-height:1.5;">${snip}</div>
       <div style="display:flex;gap:8px;">
@@ -290,16 +335,21 @@ async function showLibrary(){
 }
 
 async function openSaved(id){
-  let rec; try{rec=await dbGet(id);}catch(e){}
+  let rec; try{rec=await dbGet(id);}catch(e){console.warn('openSaved dbGet failed',e);}
   if(!rec){showLibrary();return;}
   state.level=rec.level;state.story=rec.story;state.questions=rec.questions;
-  state.qIndex=0;state.correctCount=0;state.playedOnce=false;state.honban=false;
+  state.qIndex=0;state.correctCount=0;state.playedOnce=false;
+  // 保存問題は何度でも聞ける（本番モードの1回制限は無効化）。ただしユーザーの本番モード“設定”は書き換えない。
+  state.replayUnlimited=true;
   state.currentId=rec.id;state.offline=true;state.speed=rec.speed||1.0;
   unlockAudio();
   clearTTSCache();
   // 端末に保存した音声をキャッシュに載せる（オフラインでもそのまま再生できる）
   if(rec.storyAudio)ttsCache[rec.story]=Promise.resolve(rec.storyAudio);
   (rec.qAudios||[]).forEach((au,i)=>{if(au&&rec.questions[i])ttsCache[rec.questions[i].q]=Promise.resolve(au);});
+  // 音声が欠けていて、かつオンラインなら裏で取り直して次回オフラインに備える
+  const ready=rec.storyAudio&&(rec.qAudios||[]).filter(Boolean).length>=(rec.questions||[]).length;
+  if(!ready&&navigator.onLine)bgCacheAudio(id);
   showListen();
 }
 
@@ -321,7 +371,7 @@ function showStats(){
       const col=r.rate>=80?'#7dc95e':r.rate>=50?'#ffb627':'#ef6f6c';
       return `<div style="text-align:left;margin-bottom:11px;">
         <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;color:#6a5e4e;">
-          <span>${r.k}</span><span style="color:${col};">${r.rate}%（${r.ok}/${r.n}）</span></div>
+          <span>${esc(r.k)}</span><span style="color:${col};">${r.rate}%（${r.ok}/${r.n}）</span></div>
         <div style="height:10px;background:#f3ead6;border-radius:6px;overflow:hidden;margin-top:3px;">
           <div style="height:100%;width:${r.rate}%;background:${col};transition:.3s;"></div></div>
       </div>`;
@@ -329,8 +379,8 @@ function showStats(){
   }
   const weak=rows.filter(r=>r.n>=2&&r.rate<70).slice(0,2).map(r=>r.k);
   const practiceBtn=weak.length
-    ? `<button class="playbtn" style="margin-top:8px;" onclick="practiceWeak('${weak.join(',')}')"><span>💪</span> にがてを れんしゅう</button>
-       <div class="hint">（${weak.join('・')} を おおめに 出すよ）</div>`
+    ? `<button class="playbtn" id="weakBtn" style="margin-top:8px;"><span>💪</span> にがてを れんしゅう</button>
+       <div class="hint">（${esc(weak.join('・'))} を おおめに 出すよ）</div>`
     : '';
   stage.innerHTML=`<div style="text-align:center;">
     <div class="bigicon" style="font-size:54px;">📊</div>
@@ -340,11 +390,16 @@ function showStats(){
     ${practiceBtn}
     <button class="playbtn grey" style="margin-top:12px;" onclick="showStart()"><span>←</span> もどる</button>
   </div>`;
+  // 苦手カテゴリはLLM由来の文字列なので、onclick属性に埋め込まずクロージャで渡す（属性インジェクション防止）
+  if(weak.length){const wb=document.getElementById('weakBtn');if(wb)wb.addEventListener('click',()=>practiceWeak(weak));}
 }
-function practiceWeak(s){ startStory(s.split(',')); }
+function practiceWeak(keys){ startStory(Array.isArray(keys)?keys:String(keys).split(',')); }
 
 async function startStory(focus){
+  if(state.loading)return;   // 連打ガード（二重生成＝二重課金を防ぐ）
+  state.loading=true;
   state.focus=(focus&&focus.length)?focus:null;
+  state.replayUnlimited=false;   // 新規お話は本番モード設定に従う
   unlockAudio();
   clearTTSCache();
   stage.innerHTML=`<div class="loading"><span class="spin">🎡</span><p>おはなしを かんがえているよ…</p></div>`;
@@ -352,8 +407,9 @@ async function startStory(focus){
     let url='/api/story?level='+state.level;
     if(state.focus)url+='&focus='+encodeURIComponent(state.focus.join(','));
     const r=await fetch(url);
-    const data=await r.json();
-    if(data.error)throw new Error(data.error);
+    let data={};
+    try{data=await r.json();}catch(e){}
+    if(!r.ok||data.error)throw new Error(data.error||('サーバーエラー '+r.status));
     state.story=data.story;state.questions=data.questions;
     state.qIndex=0;state.correctCount=0;state.playedOnce=false;
     state.offline=false;
@@ -361,57 +417,69 @@ async function startStory(focus){
     saveProblemRecord();   // 作った時点で端末に保存（未解決として・音声も裏で保存）
     showListen();
   }catch(e){
-    stage.innerHTML=`<div class="listen"><div class="bigicon">😢</div>
-      <h2>おはなしが つくれなかったよ</h2>
-      <button class="playbtn" onclick="startStory()"><span>🔄</span> もういちど</button></div>`;
-    showError(e.message);
+    const offline=!navigator.onLine;
+    stage.innerHTML=`<div class="listen"><div class="bigicon">${offline?'📴':'😢'}</div>
+      <h2>${offline?'いまは でんぱが ないよ':'おはなしが つくれなかったよ'}</h2>
+      <p>${offline?'ほぞんした おはなしで あそべるよ！':'もういちど ためしてみてね'}</p>
+      ${offline
+        ? `<button class="playbtn" onclick="showLibrary()"><span>📚</span> ほぞんした おはなし</button>`
+        : `<button class="playbtn" onclick="startStory()"><span>🔄</span> もういちど</button>`}
+      <button class="playbtn grey" onclick="showStart()"><span>←</span> もどる</button></div>`;
+    if(!offline)showError(e.message);
+  }finally{
+    state.loading=false;
   }
 }
 
 function showListen(){
-  const replayDisabled=state.honban;
+  const honban=isHonban();
   stage.innerHTML=`<div class="listen">
     <div class="bigicon">🎧</div>
     <h2>おはなしを よく きいてね</h2>
-    <p>${state.honban?'おはなしは いちど だけ ながれるよ':'なんども きけるよ'}</p>
+    <p>${honban?'おはなしは いちど だけ ながれるよ':'なんども きけるよ'}</p>
     <button class="playbtn" id="playBtn" onclick="onPlay()"><span>▶️</span> おはなしを きく</button>
     <button class="playbtn grey" onclick="goQuestions()">もんだいへ すすむ →</button>
-    <div class="hint" id="listenHint">${state.honban?'※ 本番モード：再生は1回だけです':'※ 何度でも きけます'}</div>
+    <div class="hint" id="listenHint">${honban?'※ 本番モード：再生は1回だけです':'※ 何度でも きけます'}</div>
   </div>`;
   // この画面を開いた瞬間から、お話と最初の設問の音声を裏で先読み（押した時に即再生）
   prefetchTTS(state.story).catch(()=>{});
   if(state.questions&&state.questions[0])prefetchTTS(state.questions[0].q).catch(()=>{});
 }
 
-function onPlay(){
-  if(state.honban&&state.playedOnce){return;}
-  state.playedOnce=true;
+async function onPlay(){
+  if(isHonban()&&state.playedOnce){return;}
   const btn=document.getElementById('playBtn');
-  playTTS(state.story,btn);
-  if(state.honban){
+  // 再生が実際に始まってから「1回消費」する。音声取得に失敗したら権利を消費しない（一度も聞けない事故を防ぐ）。
+  const ok=await playTTS(state.story,btn);
+  if(!ok)return;
+  state.playedOnce=true;
+  if(isHonban()){
     btn.disabled=true;btn.style.opacity='.5';
-    document.getElementById('listenHint').textContent='※ 本番モード：もう再生できません';
+    const hint=document.getElementById('listenHint');if(hint)hint.textContent='※ 本番モード：もう再生できません';
   }
 }
 
 function goQuestions(){stopAudio();state.qIndex=0;showQuestion();}
 
 function showQuestion(){
+  if(qTimer){clearTimeout(qTimer);qTimer=null;}
   const q=state.questions[state.qIndex];const total=state.questions.length;
-  const choices=q.choices.map((c,i)=>({...c,_i:i})).sort(()=>Math.random()-0.5);
+  const choices=shuffle(q.choices.map((c,i)=>({...c,_i:i})));
   stage.innerHTML=`<div class="qhead"><span class="qnum">もんだい ${state.qIndex+1} / ${total}</span></div>
-    <div class="qtext">${q.q}</div>
-    <button class="replay" onclick="playTTS(state.questions[state.qIndex].q,null)">🔊 もんだいを きく</button>
+    <div class="qtext">${esc(q.q)}</div>
+    <button class="replay" id="qReplay">🔊 もんだいを きく</button>
     <div class="choices" id="choices"></div>
     <div class="feedback" id="fb"></div>
     <button class="nextbtn" id="nextBtn" onclick="nextQuestion()">${state.qIndex+1<total?'つぎへ →':'けっか を みる 🎉'}</button>`;
+  document.getElementById('qReplay').onclick=()=>{playTTS(q.q,null);};
   const wrap=document.getElementById('choices');
   choices.forEach(c=>{
     const b=document.createElement('button');b.className='choice';
-    b.innerHTML=`<span class="mark">${c.correct?'⭕':'❌'}</span><span class="emoji">${c.emoji}</span><span class="lbl">${c.label}</span>`;
+    b.innerHTML=`<span class="mark">${c.correct?'⭕':'❌'}</span><span class="emoji">${esc(c.emoji)}</span><span class="lbl">${esc(c.label)}</span>`;
     b.onclick=()=>answer(b,c.correct,wrap);wrap.appendChild(b);
   });
-  setTimeout(()=>playTTS(q.q,null),300);
+  // 設問文の自動読み上げ。タイマーIDを保持し、画面遷移時に必ずクリア（前の設問音声が次画面で鳴るのを防ぐ）。
+  qTimer=setTimeout(()=>{qTimer=null;playTTS(q.q,null);},300);
   // 次の設問の音声を裏で先読みしておく（「つぎへ」で即再生）
   const nq=state.questions[state.qIndex+1];
   if(nq)prefetchTTS(nq.q).catch(()=>{});

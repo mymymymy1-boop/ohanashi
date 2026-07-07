@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>おはなしのきおく｜おでかけパック</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&family=Kosugi+Maru&display=swap');
@@ -92,11 +92,15 @@ const PACK = /*__PACK_DATA__*/null/*__END__*/;
 const state={setIndex:0,qIndex:0,correctTotal:0,answeredTotal:0,honban:false,playedOnce:false};
 const stage=document.getElementById('stage');
 let currentAudio=null;
+let qTimer=null;
+// ※このファイルの出題/解答UIは static/index.html とほぼ同じ実装。片方を直したらもう片方も要同期。
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
 
 document.getElementById('badge').textContent =
   (PACK?PACK.level_name:'') + ' / ぜんぶで ' + (PACK?PACK.sets.length:0) + 'もん';
 
-function stopAudio(){if(currentAudio){currentAudio.pause();}}
+function stopAudio(){if(qTimer){clearTimeout(qTimer);qTimer=null;}if(currentAudio){currentAudio.pause();}}
 
 // iOS対策：単一のAudio要素を使い回す（毎回new Audioするとロックされやすい）
 function ensurePlayer(){
@@ -147,7 +151,7 @@ function showStart(){
     <h2>${PACK.level_name}レベル ${PACK.sets.length}もん</h2>
     <p>じゅんびは いいかな？<br>ネットが なくても れんしゅう できるよ</p>
     <button class="playbtn" onclick="startSet()"><span>✨</span> はじめる</button>
-    <div class="toggle"><input type="checkbox" id="honban" onchange="state.honban=this.checked">
+    <div class="toggle"><input type="checkbox" id="honban" ${state.honban?'checked':''} onchange="state.honban=this.checked">
       <label for="honban">本番モード（お話は1回だけ）</label></div>
     <div class="hint">本番モードは、慣れてきたら ON にすると<br>実際の試験に近い練習ができます</div>
   </div>`;
@@ -185,10 +189,11 @@ function goQuestions(){stopAudio();state.qIndex=0;showQuestion();}
 
 function showQuestion(){
   const set=PACK.sets[state.setIndex];
+  if(qTimer){clearTimeout(qTimer);qTimer=null;}
   const q=set.questions[state.qIndex];const total=set.questions.length;
-  const choices=q.choices.map((c,i)=>({...c,_i:i})).sort(()=>Math.random()-0.5);
+  const choices=shuffle(q.choices.map((c,i)=>({...c,_i:i})));
   stage.innerHTML=`<div class="qhead"><span class="qnum">おはなし ${state.setIndex+1} ｜ もんだい ${state.qIndex+1}/${total}</span></div>
-    <div class="qtext">${q.q}</div>
+    <div class="qtext">${esc(q.q)}</div>
     <button class="replay" id="qReplay">🔊 もんだいを きく</button>
     <div class="choices" id="choices"></div>
     <div class="feedback" id="fb"></div>
@@ -197,10 +202,10 @@ function showQuestion(){
   const wrap=document.getElementById('choices');
   choices.forEach(c=>{
     const b=document.createElement('button');b.className='choice';
-    b.innerHTML=`<span class="mark">${c.correct?'⭕':'❌'}</span><span class="emoji">${c.emoji}</span><span class="lbl">${c.label}</span>`;
+    b.innerHTML=`<span class="mark">${c.correct?'⭕':'❌'}</span><span class="emoji">${esc(c.emoji)}</span><span class="lbl">${esc(c.label)}</span>`;
     b.onclick=()=>answer(b,c.correct,wrap);wrap.appendChild(b);
   });
-  setTimeout(()=>playSrc(q.q_audio,null),300);
+  qTimer=setTimeout(()=>{qTimer=null;playSrc(q.q_audio,null);},300);
 }
 
 function answer(btn,correct,wrap){
@@ -235,7 +240,7 @@ function showResult(){
     <button class="playbtn" style="margin-left:auto;margin-right:auto;" onclick="restart()"><span>🔄</span> もういちど</button></div>`;
 }
 
-function restart(){state.setIndex=0;state.qIndex=0;state.correctTotal=0;state.answeredTotal=0;state.playedOnce=false;showStart();}
+function restart(){state.setIndex=0;state.qIndex=0;state.correctTotal=0;state.answeredTotal=0;state.playedOnce=false;state.honban=false;showStart();}
 
 if(!PACK){stage.innerHTML='<div class="listen"><div class="bigicon">😢</div><h2>データが ありません</h2></div>';}
 else showStart();

@@ -6,18 +6,15 @@ echo ============================================
 echo   おはなしのきおく  起動中...
 echo ============================================
 
-REM 初回のみ依存をインストール
-if not exist ".installed" (
-    echo 初回セットアップ中です。少しお待ちください...
-    python -m pip install -r requirements.txt
-    if errorlevel 1 (
-        echo.
-        echo [エラー] Python が見つからないか、インストールに失敗しました。
-        echo Python がインストールされているか確認してください。
-        pause
-        exit /b 1
-    )
-    echo done > .installed
+REM 依存をインストール（既に入っていれば数秒で完了。requirements.txt を更新したら自動で反映される）
+echo 必要なライブラリを確認中です...
+python -m pip install -q -r requirements.txt
+if errorlevel 1 (
+    echo.
+    echo [エラー] Python が見つからないか、インストールに失敗しました。
+    echo Python 3.11 系がインストールされ、PATH に通っているか確認してください。
+    pause
+    exit /b 1
 )
 
 REM .env 確認

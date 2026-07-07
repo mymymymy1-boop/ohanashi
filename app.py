@@ -5,7 +5,7 @@
 - 読み上げ音声を ElevenLabs で生成（同一テキストはキャッシュしてクレジット節約）
 - イラスト選択肢をタップして解答
 """
-import os, json, time, hashlib, datetime, webbrowser, threading, random
+import os, json, time, base64, hmac, hashlib, datetime, webbrowser, threading, random
 from pathlib import Path
 from flask import Flask, request, jsonify, send_file, send_from_directory, Response
 import requests
@@ -66,14 +66,38 @@ app = Flask(__name__, static_folder=str(BASE / "static"))
 # ---------------- 簡易パスワード保護（クレジット悪用防止） ----------------
 @app.before_request
 def _require_auth():
+    # ヘルスチェックは認証不要（外形監視・Renderのプローブが401で弾かれないように）
+    if request.path == "/healthz":
+        return
     # APP_PASSWORD 未設定（ローカル開発）なら認証なしで通す
     if not APP_PASSWORD:
         return
     auth = request.authorization
-    if auth and auth.username == APP_USERNAME and auth.password == APP_PASSWORD:
+    if auth and hmac.compare_digest(auth.username or "", APP_USERNAME) \
+            and hmac.compare_digest(auth.password or "", APP_PASSWORD):
         return
+    # 認証失敗はログに残す（不審なアクセス・総当たりの検知用）
+    print(f"[auth] 認証失敗 path={request.path} ip={request.remote_addr}", flush=True)
     return Response("認証が必要です", 401,
                     {"WWW-Authenticate": 'Basic realm="ohanashi"'})
+
+@app.after_request
+def _security_headers(resp):
+    # アプリはインラインJS/CSSに依存するため厳格なCSPは付けない（壊れる）。
+    # 破綻しない範囲の安全ヘッダーだけ付与する。
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    if os.getenv("RENDER"):
+        resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return resp
+
+@app.route("/healthz")
+def healthz():
+    # 200を返すだけの死活確認。キーの有無も返してレディネス判断に使えるようにする。
+    return jsonify({"ok": True,
+                    "anthropic_key": bool(ANTHROPIC_API_KEY),
+                    "elevenlabs_key": bool(ELEVENLABS_API_KEY)})
 
 # ---------------- 問題生成 ----------------
 LEVEL_SPEC = {
@@ -252,6 +276,7 @@ for _m in [_env_model, "claude-sonnet-4-6", "claude-sonnet-4-5"]:
     if _m and _m not in MODEL_CANDIDATES:
         MODEL_CANDIDATES.append(_m)
 _model_idx = 0  # 現在使うモデル候補の位置（404検出で進める。プロセス生存中は戻さない）
+_MODEL_LOCK = threading.Lock()  # _model_idx の同時インクリメント（候補飛ばし）を防ぐ
 
 def _extract_json(text: str) -> dict:
     """モデル出力からJSON本体を取り出してパースする。前後に説明文やコードフェンスが混ざっても救出する。"""
@@ -306,11 +331,14 @@ def generate_story(level: str, focus=None) -> dict:
                 },
                 timeout=60,
             )
-            # モデル提供終了 → 次候補へ切り替えて即やり直し
+            # モデル提供終了 → 次候補へ切り替えて即やり直し（同時404での二重加算をロックで防ぐ）
             if r.status_code == 404 and _model_idx < len(MODEL_CANDIDATES) - 1:
-                print(f"[generate_story] モデル {model} が404（提供終了の可能性）→ "
-                      f"{MODEL_CANDIDATES[_model_idx + 1]} に切り替え", flush=True)
-                _model_idx += 1
+                with _MODEL_LOCK:
+                    # まだ誰も切り替えていなければ（今失敗したモデルが現役なら）1段だけ進める
+                    if _model_idx < len(MODEL_CANDIDATES) - 1 and MODEL_CANDIDATES[_model_idx] == model:
+                        print(f"[generate_story] モデル {model} が404（提供終了の可能性）→ "
+                              f"{MODEL_CANDIDATES[_model_idx + 1]} に切り替え", flush=True)
+                        _model_idx += 1
                 continue
             r.raise_for_status()
             data = r.json()
@@ -340,7 +368,8 @@ def api_story():
         parsed = generate_story(level, focus or None)
         return jsonify(parsed)
     except Exception as e:
-        return jsonify({"error": f"問題生成に失敗しました: {e}"}), 500
+        print(f"[api_story] 生成失敗: {e}", flush=True)  # 詳細はサーバーログのみ
+        return jsonify({"error": "おはなしを つくれませんでした。すこし まってから もういちど ためしてね。"}), 500
 
 # ---------------- 音声生成（キャッシュ付き） ----------------
 _LOG_LOCK = threading.Lock()
@@ -460,7 +489,8 @@ def api_tts():
         audio, _ = synth(text, ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL, speed)
         return Response(audio, mimetype="audio/mpeg")
     except Exception as e:
-        return jsonify({"error": f"音声生成に失敗しました: {e}"}), 500
+        print(f"[api_tts] 音声失敗: {e}", flush=True)
+        return jsonify({"error": "おとを つくれませんでした。すこし まってから もういちど。"}), 500
 
 # ---------------- 声くらべ ----------------
 @app.route("/api/compare/list")
@@ -491,7 +521,8 @@ def api_compare_audio():
         audio, _ = synth(text, voice_id, model)
         return Response(audio, mimetype="audio/mpeg")
     except Exception as e:
-        return jsonify({"error": f"音声生成に失敗しました: {e}"}), 500
+        print(f"[api_compare_audio] 音声失敗: {e}", flush=True)
+        return jsonify({"error": "音声を生成できませんでした。時間をおいて再度お試しください。"}), 500
 
 @app.route("/api/voice")
 def api_voice():
@@ -499,8 +530,6 @@ def api_voice():
                     "compare_available": len(COMPARE_VOICES) * len(COMPARE_MODELS) > 1})
 
 # ---------------- おでかけパック（オフライン用HTML書き出し） ----------------
-import base64
-
 # 進捗を保持（簡易）
 PACK_PROGRESS = {"running": False, "done": 0, "total": 0, "msg": "", "file": None, "error": None}
 
@@ -544,6 +573,8 @@ def write_pack_html(sets, level):
     lv_name = "慶應横浜" if level == "keio" else "桐蔭学園"
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
     payload = json.dumps({"level": level, "level_name": lv_name, "sets": sets}, ensure_ascii=False)
+    # <script> 内へ埋め込むため '<' を \u003c にエスケープし </script> による早期終了・タグ注入を防ぐ（JSON文字列として等価）
+    payload = payload.replace("<", chr(92) + "u003c")
     html = tpl.replace("/*__PACK_DATA__*/null/*__END__*/", payload)
     out_dir = BASE / "packs"
     out_dir.mkdir(exist_ok=True)
