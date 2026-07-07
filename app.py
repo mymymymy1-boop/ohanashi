@@ -5,7 +5,7 @@
 - 読み上げ音声を ElevenLabs で生成（同一テキストはキャッシュしてクレジット節約）
 - イラスト選択肢をタップして解答
 """
-import os, json, hashlib, datetime, webbrowser, threading, random
+import os, json, time, hashlib, datetime, webbrowser, threading, random
 from pathlib import Path
 from flask import Flask, request, jsonify, send_file, send_from_directory, Response
 import requests
@@ -235,27 +235,90 @@ def build_prompt(level: str, focus=None) -> str:
   ]
 }}"""
 
-def generate_story(level: str, focus=None) -> dict:
-    """Anthropic APIで問題1セットを生成して dict を返す。失敗時は例外。"""
-    r = requests.post(
-        "https://api.anthropic.com/v1/messages",
-        headers={
-            "x-api-key": ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        json={
-            "model": "claude-sonnet-4-6",
-            "max_tokens": 1500,
-            "messages": [{"role": "user", "content": build_prompt(level, focus)}],
-        },
-        timeout=60,
-    )
-    r.raise_for_status()
-    data = r.json()
-    text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
+# 問題生成モデル。環境変数 ANTHROPIC_MODEL で差し替え可能（コード変更なしで復旧できる）。
+# 提供終了(404)を検出したら次候補へ自動で切り替える（2026-06-16 の claude-sonnet-4-20250514 退役事故の再発防止）。
+_env_model = os.getenv("ANTHROPIC_MODEL", "").strip()
+MODEL_CANDIDATES = []
+for _m in [_env_model, "claude-sonnet-4-6", "claude-sonnet-4-5"]:
+    if _m and _m not in MODEL_CANDIDATES:
+        MODEL_CANDIDATES.append(_m)
+_model_idx = 0  # 現在使うモデル候補の位置（404検出で進める。プロセス生存中は戻さない）
+
+def _extract_json(text: str) -> dict:
+    """モデル出力からJSON本体を取り出してパースする。前後に説明文やコードフェンスが混ざっても救出する。"""
     text = text.replace("```json", "").replace("```", "").strip()
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if 0 <= start < end:
+            return json.loads(text[start:end + 1])
+        raise
+
+def _validate_story(data) -> str:
+    """生成結果の構造チェック。壊れていれば理由を返す（正常なら空文字）。"""
+    if not isinstance(data, dict) or not str(data.get("story", "")).strip():
+        return "story がありません"
+    qs = data.get("questions")
+    if not isinstance(qs, list) or not qs:
+        return "questions がありません"
+    for i, q in enumerate(qs):
+        if not str(q.get("q", "")).strip():
+            return f"設問{i+1}の文がありません"
+        ch = q.get("choices")
+        if not isinstance(ch, list) or len(ch) != 4:
+            return f"設問{i+1}の選択肢が4つではありません"
+        if sum(1 for c in ch if c.get("correct") is True) != 1:
+            return f"設問{i+1}の正解が1つに決まっていません"
+    return ""
+
+def generate_story(level: str, focus=None) -> dict:
+    """Anthropic APIで問題1セットを生成して dict を返す。
+    一時エラー(429/5xx/タイムアウト)・JSON崩れ・出力途切れは自動リトライ（最大3回）。
+    モデル提供終了(404)は次候補モデルへ恒久切り替え。3回失敗で例外。"""
+    global _model_idx
+    last_err = None
+    for attempt in range(3):
+        model = MODEL_CANDIDATES[min(_model_idx, len(MODEL_CANDIDATES) - 1)]
+        try:
+            r = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": model,
+                    # 慶應レベルは平均1250トークン出るため1500では途切れることがあった。
+                    # 課金は実際に生成した分だけなので上限は大きく取って途切れを根絶する。
+                    "max_tokens": 4000,
+                    "messages": [{"role": "user", "content": build_prompt(level, focus)}],
+                },
+                timeout=60,
+            )
+            # モデル提供終了 → 次候補へ切り替えて即やり直し
+            if r.status_code == 404 and _model_idx < len(MODEL_CANDIDATES) - 1:
+                print(f"[generate_story] モデル {model} が404（提供終了の可能性）→ "
+                      f"{MODEL_CANDIDATES[_model_idx + 1]} に切り替え", flush=True)
+                _model_idx += 1
+                continue
+            r.raise_for_status()
+            data = r.json()
+            if data.get("stop_reason") == "max_tokens":
+                raise ValueError("出力が上限で途切れました(max_tokens)")
+            text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
+            parsed = _extract_json(text)
+            bad = _validate_story(parsed)
+            if bad:
+                raise ValueError(f"生成結果が不正: {bad}")
+            return parsed
+        except Exception as e:
+            last_err = e
+            print(f"[generate_story] {attempt + 1}回目失敗 (model={model}, level={level}): {e}", flush=True)
+            if attempt < 2:
+                time.sleep(1 + attempt * 2)  # 1秒→3秒の軽いバックオフ（429/529対策）
+    raise RuntimeError(f"3回試しても生成できませんでした（最後のエラー: {last_err}）")
 
 @app.route("/api/story")
 def api_story():

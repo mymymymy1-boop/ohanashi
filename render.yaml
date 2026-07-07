@@ -7,7 +7,8 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 120
+    # timeout はリトライ最悪ケース（Anthropic 60秒×3回＋バックオフ≒190秒）より長くする
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 240
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
