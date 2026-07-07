@@ -23,6 +23,15 @@ ELEVENLABS_MODEL    = os.getenv("ELEVENLABS_MODEL", "eleven_v3").strip()
 APP_USERNAME = os.getenv("APP_USERNAME", "ohanashi").strip()
 APP_PASSWORD = os.getenv("APP_PASSWORD", "").strip()
 
+# 【フェイルクローズド】本番(Render)で APP_PASSWORD 未設定なら起動を止める。
+# 空パスワード＝認証なし公開＝Anthropic/ElevenLabs のクレジット悪用に直結するため、
+# 設定ミスで無防備に公開されるより起動を落として気づけるようにする（Render は環境変数 RENDER=true を自動付与）。
+if os.getenv("RENDER") and not APP_PASSWORD:
+    raise RuntimeError(
+        "APP_PASSWORD が未設定です。本番公開では必須です"
+        "（Render ダッシュボード → Environment に APP_PASSWORD を設定してください）。"
+    )
+
 def _parse_pairs(s):
     out = []
     for item in (s or "").split(","):
@@ -334,12 +343,28 @@ def api_story():
         return jsonify({"error": f"問題生成に失敗しました: {e}"}), 500
 
 # ---------------- 音声生成（キャッシュ付き） ----------------
+_LOG_LOCK = threading.Lock()
+
 def log_usage(kind: str, chars: int, cached: bool):
-    new = not LOG_FILE.exists()
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        if new:
-            f.write("datetime,kind,chars,cached\n")
-        f.write(f"{datetime.datetime.now().isoformat()},{kind},{chars},{int(cached)}\n")
+    # 複数スレッド同時書き込みでの行混線・ヘッダー重複を防ぐ
+    with _LOG_LOCK:
+        new = not LOG_FILE.exists()
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            if new:
+                f.write("datetime,kind,chars,cached\n")
+            f.write(f"{datetime.datetime.now().isoformat()},{kind},{chars},{int(cached)}\n")
+
+# 同一テキストの同時生成でElevenLabsを二重に叩かないための、キャッシュキー単位の生成ロック。
+# 先着1本だけが実際に生成し、後続は完了を待って同じキャッシュを読む（クレジット二重消費の根治）。
+_SYNTH_LOCKS = {}
+_SYNTH_LOCKS_GUARD = threading.Lock()
+
+def _synth_lock(key: str) -> threading.Lock:
+    with _SYNTH_LOCKS_GUARD:
+        lk = _SYNTH_LOCKS.get(key)
+        if lk is None:
+            lk = _SYNTH_LOCKS[key] = threading.Lock()
+        return lk
 
 def synth(text, voice_id, model_id, speed=1.0):
     """ElevenLabsで音声生成。(bytes, from_cache) を返す。失敗時は例外。speedは0.7〜1.2。"""
@@ -351,48 +376,77 @@ def synth(text, voice_id, model_id, speed=1.0):
     # speedごとに別キャッシュ（速度を変えても正しく作り分ける）
     key = hashlib.md5(f"{voice_id}:{model_id}:{speed}:{text}".encode("utf-8")).hexdigest()
     cache_path = AUDIO_DIR / f"{key}.mp3"
+    kind = "story" if len(text) > 60 else "question"
     if cache_path.exists():
-        log_usage("story" if len(text) > 60 else "question", len(text), True)
+        log_usage(kind, len(text), True)
         return cache_path.read_bytes(), True
 
-    voice_settings = {
-        "stability": 0.80,
-        "similarity_boost": 0.70,
-        "style": 0.0,
-        "use_speaker_boost": True,
-    }
-    # 等速(1.0)のときは speed を送らない（非対応モデルでのエラーを避ける）
-    if abs(speed - 1.0) > 0.001:
-        voice_settings["speed"] = speed
-    payload = {
-        "text": text,
-        "model_id": model_id,
-        # 日本語を明示して誤読・言語誤認を抑える
-        "language_code": "ja",
-        # 試験官の落ち着いた読み聞かせに寄せる：安定性高め・抑揚控えめ
-        "voice_settings": voice_settings,
-    }
+    # 同一キーの生成を直列化。ロック取得後にもう一度キャッシュを見る（先着スレッドが作り終えていれば読むだけ）。
+    with _synth_lock(key):
+        if cache_path.exists():
+            log_usage(kind, len(text), True)
+            return cache_path.read_bytes(), True
 
-    def _post(pl):
-        return requests.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-            headers={"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json"},
-            json=pl, timeout=90,
-        )
+        voice_settings = {
+            "stability": 0.80,
+            "similarity_boost": 0.70,
+            "style": 0.0,
+            "use_speaker_boost": True,
+        }
+        # 等速(1.0)のときは speed を送らない（非対応モデルでのエラーを避ける）
+        if abs(speed - 1.0) > 0.001:
+            voice_settings["speed"] = speed
+        payload = {
+            "text": text,
+            "model_id": model_id,
+            # 日本語を明示して誤読・言語誤認を抑える
+            "language_code": "ja",
+            # 試験官の落ち着いた読み聞かせに寄せる：安定性高め・抑揚控えめ
+            "voice_settings": voice_settings,
+        }
 
-    r = _post(payload)
-    # language_code 非対応モデルの場合に備えてリトライ
-    if r.status_code >= 400 and "language_code" in (r.text or ""):
-        payload.pop("language_code", None)
-        r = _post(payload)
-    # speed 非対応モデルの場合に備えてリトライ（speedを外す）
-    if r.status_code >= 400 and "speed" in (r.text or "") and "speed" in payload["voice_settings"]:
-        payload["voice_settings"].pop("speed", None)
-        r = _post(payload)
-    r.raise_for_status()
-    cache_path.write_bytes(r.content)
-    log_usage("story" if len(text) > 60 else "question", len(text), False)
-    return r.content, False
+        def _post(pl):
+            return requests.post(
+                f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+                headers={"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json"},
+                json=pl, timeout=90,
+            )
+
+        def _post_with_param_fallback():
+            r = _post(payload)
+            # language_code 非対応モデルの場合に備えてリトライ
+            if r.status_code >= 400 and "language_code" in (r.text or ""):
+                payload.pop("language_code", None)
+                r = _post(payload)
+            # speed 非対応モデルの場合に備えてリトライ（speedを外す）
+            if r.status_code >= 400 and "speed" in (r.text or "") and "speed" in payload["voice_settings"]:
+                payload["voice_settings"].pop("speed", None)
+                r = _post(payload)
+            return r
+
+        # 一時エラー(429/5xx/接続タイムアウト)は指数バックオフで最大3回リトライ（お話生成側と対称にする）
+        last_err = None
+        for attempt in range(3):
+            try:
+                r = _post_with_param_fallback()
+                if r.status_code == 429 or r.status_code >= 500:
+                    raise RuntimeError(f"ElevenLabs 一時エラー {r.status_code}")
+                r.raise_for_status()
+                break
+            except (requests.RequestException, RuntimeError) as e:
+                last_err = e
+                print(f"[synth] {attempt + 1}回目失敗: {e}", flush=True)
+                if attempt < 2:
+                    time.sleep(1 + attempt * 2)
+        else:
+            raise RuntimeError(f"音声生成に3回失敗しました（最後のエラー: {last_err}）")
+
+        # 一時ファイルへ書いてから os.replace でアトミックに差し替え（途中ファイルの読取を防ぐ）
+        tmp_path = cache_path.with_suffix(".tmp")
+        tmp_path.write_bytes(r.content)
+        os.replace(tmp_path, cache_path)
+        log_usage(kind, len(text), False)
+        return r.content, False
 
 @app.route("/api/tts")
 def api_tts():
@@ -460,19 +514,27 @@ def build_pack(level, count):
         PACK_PROGRESS.update(running=True, done=0, total=count, msg="準備中…", file=None, error=None)
         sets = []
         for i in range(count):
-            PACK_PROGRESS["msg"] = f"{i+1}問目のお話を生成中…"
-            data = generate_story(level)
-            # お話の音声
-            PACK_PROGRESS["msg"] = f"{i+1}問目の音声を生成中…"
-            data["story_audio"] = b64_audio(data["story"], ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL)
-            # 各設問の音声
-            for q in data.get("questions", []):
-                q["q_audio"] = b64_audio(q["q"], ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL)
-            sets.append(data)
+            # 1話ずつ独立して try。途中1話が失敗しても、生成済み（＝課金済み）の話は捨てずに成果物へ残す。
+            try:
+                PACK_PROGRESS["msg"] = f"{i+1}問目のお話を生成中…"
+                data = generate_story(level)
+                # お話の音声
+                PACK_PROGRESS["msg"] = f"{i+1}問目の音声を生成中…"
+                data["story_audio"] = b64_audio(data["story"], ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL)
+                # 各設問の音声
+                for q in data.get("questions", []):
+                    q["q_audio"] = b64_audio(q["q"], ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL)
+                sets.append(data)
+            except Exception as e:
+                print(f"[build_pack] {i+1}問目を生成できずスキップ: {e}", flush=True)
             PACK_PROGRESS["done"] = i + 1
+        if not sets:
+            PACK_PROGRESS.update(running=False, error="1問も作れませんでした", msg="失敗しました")
+            return
         PACK_PROGRESS["msg"] = "ファイルを書き出し中…"
         out_path = write_pack_html(sets, level)
-        PACK_PROGRESS.update(running=False, msg="完成しました", file=str(out_path.name))
+        done_msg = "完成しました" if len(sets) == count else f"完成しました（{len(sets)}/{count}問。一部は作れませんでした）"
+        PACK_PROGRESS.update(running=False, msg=done_msg, file=str(out_path.name))
     except Exception as e:
         PACK_PROGRESS.update(running=False, error=str(e), msg="失敗しました")
 
@@ -496,7 +558,11 @@ def api_pack_start():
     if PACK_PROGRESS["running"]:
         return jsonify({"error": "すでに生成中です"}), 400
     level = request.args.get("level", "keio")
-    count = max(1, min(20, int(request.args.get("count", 10))))
+    try:
+        count = int(request.args.get("count", 10))
+    except (TypeError, ValueError):
+        count = 10
+    count = max(1, min(20, count))
     threading.Thread(target=build_pack, args=(level, count), daemon=True).start()
     return jsonify({"ok": True})
 
@@ -506,9 +572,11 @@ def api_pack_progress():
 
 @app.route("/api/pack/download")
 def api_pack_download():
-    name = request.args.get("file", "")
-    path = BASE / "packs" / name
-    if not name or not path.exists():
+    # パストラバーサル対策: ディレクトリ成分を除去し、解決後パスが packs/ 直下であることを検証する。
+    name = os.path.basename(request.args.get("file", ""))
+    packs_dir = (BASE / "packs").resolve()
+    path = (packs_dir / name).resolve()
+    if not name or path.parent != packs_dir or not path.exists():
         return jsonify({"error": "ファイルが見つかりません"}), 404
     return send_file(path, mimetype="text/html", as_attachment=True, download_name=name)
 

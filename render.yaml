@@ -5,6 +5,11 @@ services:
   - type: web
     name: ohanashi
     runtime: python
+    # 【注意】plan:free はディスクが揮発。デプロイ・再起動・15分アイドルスリープのたびに
+    # audio_cache/ ・ usage_log.csv ・ packs/ が消える＝音声キャッシュによるクレジット節約は
+    # 本番では限定的（設問・声くらべ分のみ有効、お話本文は毎回ランダムで元々ヒットしない）。
+    # 恒久的にキャッシュ/ログを残すなら有料の Persistent Disk か外部ストレージが必要。
+    # おでかけパックは生成後すぐにダウンロードすること（再起動で成果物が消えるため）。
     plan: free
     buildCommand: pip install -r requirements.txt
     # timeout はリトライ最悪ケース（Anthropic 60秒×3回＋バックオフ≒190秒）より長くする
