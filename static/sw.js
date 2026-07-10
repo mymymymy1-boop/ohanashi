@@ -1,6 +1,6 @@
 // おはなしのきおく Service Worker（オフライン用にアプリ本体をキャッシュ）
 // 資産やこのファイルを更新したら C の版番号を上げること（古いキャッシュを確実に破棄するため）。
-const C = 'ohanashi-v2';
+const C = 'ohanashi-v3';
 const SHELL = ['/', '/manifest.webmanifest', '/static/manifest.webmanifest',
   '/static/icon-192.png', '/static/icon-512.png', '/static/apple-touch-icon.png'];
 

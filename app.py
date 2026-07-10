@@ -461,6 +461,11 @@ def synth(text, voice_id, model_id, speed=1.0):
                 if r.status_code == 429 or r.status_code >= 500:
                     raise RuntimeError(f"ElevenLabs 一時エラー {r.status_code}")
                 r.raise_for_status()
+                # 200でも本文が空/極小＝実質無音のことがある（長文や稀な入力でElevenLabsが空返し）。
+                # これをそのままキャッシュすると、そのテキストは以後ずっと無音固着になる。
+                # 失敗として扱いリトライし、最後まで空なら例外にしてキャッシュを書かない。
+                if len(r.content) < 500:
+                    raise RuntimeError(f"ElevenLabs 空応答 ({len(r.content)}B)")
                 break
             except (requests.RequestException, RuntimeError) as e:
                 last_err = e

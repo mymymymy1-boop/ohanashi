@@ -223,31 +223,55 @@ function prefetchTTS(text){
   if(ttsCache[text]) return ttsCache[text];
   const p=fetch('/api/tts?text='+encodeURIComponent(text)+'&speed='+state.speed)
     .then(r=>{ if(!r.ok){ return r.json().catch(()=>({})).then(j=>{throw new Error(j.error||('HTTP '+r.status));}); } return r.blob(); })
-    .then(blob=>{ const u=URL.createObjectURL(blob); ttsUrls.push(u); return u; })
+    // 空/極小(実質無音)のblobは「成功」にしない。URL化してキャッシュに焼き付けると
+    // その音声だけ永遠に無音になる（慶應の長文で万一空応答が来た時の固着を防ぐ）。
+    .then(blob=>{ if(!blob||blob.size<500){throw new Error('empty audio ('+(blob?blob.size:0)+'B)');} const u=URL.createObjectURL(blob); ttsUrls.push(u); return u; })
     .catch(e=>{ delete ttsCache[text]; throw e; });
   ttsCache[text]=p; return p;
+}
+// 特定テキストの先読みだけ破棄（失敗した音声を作り直させる。全体は消さない）。
+function dropTTS(text){
+  const p=ttsCache[text]; delete ttsCache[text];
+  if(p&&p.then)p.then(u=>{try{URL.revokeObjectURL(u);}catch(e){}const i=ttsUrls.indexOf(u);if(i>=0)ttsUrls.splice(i,1);}).catch(()=>{});
 }
 function clearTTSCache(){ ttsUrls.forEach(u=>{try{URL.revokeObjectURL(u);}catch(e){}}); ttsUrls=[]; ttsCache={}; }
 
 // 再生開始できたら true、失敗/横取りされたら false を返す（例外は投げない）。
+// 一過性の失敗・空音声・コールドスタートで「無音のまま終わる」ことがないよう最大2回まで自動リトライする。
 async function playTTS(text,btn){
   const a=ensurePlayer();
   a.pause();
   const myseq=++playSeq;   // この再生の通し番号。await中に新しい再生/停止が来たら中断する。
   if(btn){btn.classList.add('playing');btn.disabled=true;const s=btn.querySelector('span');if(s)s.textContent='🔊';}
   const restore=()=>{if(btn){btn.classList.remove('playing');btn.disabled=false;const s=btn.querySelector('span');if(s)s.textContent='▶️';}};
-  try{
-    const url=await prefetchTTS(text);   // 先読み済みなら即時、未取得なら今取得
-    if(myseq!==playSeq){restore();return false;}   // 取得中に別の再生/停止が来た→この再生は破棄
-    a.muted=false;
-    a.src=url;
-    a.onended=restore;
-    await new Promise(res=>{a.oncanplaythrough=res;a.onerror=res;a.load();});
-    if(myseq!==playSeq){restore();return false;}
-    a.currentTime=0;
-    await a.play();
-    return true;
-  }catch(e){restore();showError('おとが でなかったよ。もういちど おしてね');return false;}
+  for(let attempt=0;attempt<2;attempt++){
+    try{
+      const url=await prefetchTTS(text);   // 先読み済みなら即時、未取得なら今取得
+      if(myseq!==playSeq){restore();return false;}   // 取得中に別の再生/停止が来た→この再生は破棄
+      a.muted=false;
+      a.src=url;
+      a.onended=restore;
+      a.load();
+      // 【重要】canplaythrough を待つのは禁止。長い音声（慶應の長文）では全体をノンストップ
+      // 再生できると判定されるまで発火せず、特にiOS Safariでは不発になり永久固着＝無音になる。
+      // blobは端末内で即再生可能なので、canplay/loadeddata を「タイムアウト付き」で軽く待つだけにし、
+      // どちらも来なくても 1.2秒後に play() へ進む（待って固まるより鳴らすことを優先）。
+      await Promise.race([
+        new Promise(res=>{a.oncanplay=res;a.onloadeddata=res;}),
+        new Promise(res=>setTimeout(res,1200)),
+      ]);
+      if(myseq!==playSeq){restore();return false;}
+      a.currentTime=0;
+      await a.play();
+      return true;
+    }catch(e){
+      if(myseq!==playSeq){restore();return false;}   // 横取りされたなら黙って終了（エラーにしない）
+      dropTTS(text);   // 失敗した先読みを捨てて作り直させる
+      if(attempt===0){await new Promise(r=>setTimeout(r,600));continue;}   // 1回だけ待って再挑戦
+      restore();showError('おとが でなかったよ。もういちど おしてね');return false;
+    }
+  }
+  restore();return false;
 }
 
 // 正解のときだけ鳴らす「ピンポン♪」音（Web Audioで合成。音声ファイル不要）
