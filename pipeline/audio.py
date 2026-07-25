@@ -28,8 +28,12 @@ from pipeline.common import CONTENT_DIR
 from pipeline.qc import load_unit, qc_unit
 from pipeline.tts import VOICE_QUESTION, VOICE_STORY, synth_pro
 
-# 音声バックエンド: elevenlabs (既定) | aivis (ローカルAivisSpeech Engine・生成0円)
-TTS_BACKEND = os.getenv("TTS_BACKEND", "elevenlabs").strip().lower()
+# 音声バックエンド: aivis (既定・ローカルAivisSpeech Engine・生成0円) | elevenlabs
+# 2026-07-21にElevenLabsは「日本語のピッチアクセントが構造的にダメ」と検品で確定し、
+# 本番音声は AivisSpeech (本文=morioki / 設問=TANAKA) に全面移行済み。
+# 既定が elevenlabs のままだと、env未設定の実行で**課金され、しかも声が本番と違う音声**が
+# 生成される(2026-07-25に実際に54ファイル誤生成)。既定を実態に合わせる。
+TTS_BACKEND = os.getenv("TTS_BACKEND", "aivis").strip().lower()
 # TTS原稿の漢字化(同音語の解釈を確定させアクセント辞書を正しく引かせる)に使う軽量モデル
 KANJI_MODEL = os.getenv("KANJI_MODEL", "claude-haiku-4-5").strip()
 

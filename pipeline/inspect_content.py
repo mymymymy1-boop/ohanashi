@@ -158,6 +158,7 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="先頭N件だけ検品（試し打ち）")
     ap.add_argument("--group", default="", help="グループ絞り込み(例 C)")
     ap.add_argument("--level", type=int, default=0, help="レベル絞り込み")
+    ap.add_argument("--units", default="", help="ユニットID指定(カンマ区切り・修復後の再検品用)")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--out", default="inspect_report.jsonl")
     ap.add_argument("--resume", action="store_true", help="既存レポートにある unit_id をスキップ")
@@ -167,6 +168,9 @@ def main():
     manifest = json.loads((cdir / "review_manifest.json").read_text(encoding="utf-8"))
     labels = json.loads((cdir / "choice_labels.json").read_text(encoding="utf-8"))
     items = manifest["items"]
+    if args.units:
+        want_u = {u.strip() for u in args.units.split(",") if u.strip()}
+        items = [x for x in items if x["unit_id"] in want_u]
     if args.group:
         items = [x for x in items if x.get("group") == args.group]
     if args.level:

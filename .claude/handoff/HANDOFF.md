@@ -7,6 +7,19 @@
 - **⚠️認証オフ**: VPSの`APP_PASSWORD`が空(旧アプリ時代から)＝`/pro`も`/api`(課金)も未認証公開。泰介さん判断で「今は認証なしのまま」。将来`.env`にAPP_PASSWORD設定→`pm2 restart ohanashi`で全体Basic認証化可。
 - 再デプロイ: `git push`→VPSで`git merge --ff-only origin/master && venv/bin/pip install -qr requirements.txt && pm2 restart ohanashi && pm2 save`。コンテンツ更新はtar-over-ssh(rsync不可)。詳細はメモリ[[ohanashi-deployment]]。
 
+## 0-a. 全252問の意味検品と隔離（2026-07-25・**本番反映済み** コミット `d348d07`）
+
+**検品完了。確定欠陥45話を出題から隔離し、健全な207話で練習できる状態。**
+
+- **方法(2層+人)**: `pipeline/inspect_content.py`（LLM第二の読み手＝機械QCで測れない観点）→ `pipeline/verify_findings.py`（**反証側に立つ敵対的検証**・迷ったら棄却）→ 私が本文/実画像で抜き取り裏取り
+- **結果**: 意味検品 high 69件 → 検証で**46件確定・22件棄却（偽陽性32%を除去）**。影響45ユニット/252（18%）。実コスト$6.8
+- **内訳**: 正解が一意に決まらない23 / 本文に根拠がない17 / 本文の不自然さ3 / 選択肢が絵で区別不能2 / ダミーも正解1
+- **レベル別健全率**: Lv1 96% / Lv2 96% / Lv3 77% / Lv4 89% / **Lv5 56%**（長文＋T9二重順序に集中）
+- **根本原因**: `generate.gen_questions` が骨格(`dual_orders`/`numbers`/`emotions`)と本文の両方を受け取るため、**本文に書かれていない骨格の事実で出題**していた。機械QCは「正解語が根拠場面にあるか」しか見ず構造的に見逃す
+- **再発防止(済)**: `03_question_gen.md`＝根拠は本文の一文を指させる／同時行動(「AとBは〜」)の前後を問うの禁止、`02_level_expand.md`＝骨格の順序・数・心情は本文に明示して書く（実例つき）
+- **隔離の実装**: `content/pilot/defect_units.json`(45件) を `/pro/play` が読んで出題から除外。**データは残すので修復後に戻せる**。親設定に「見直し中の45話は出題から外しています」と表示。本番で207話・欠陥混入0を実測
+- **修復**: `pipeline/repair_questions.py`（本文と本文音声を保全し**設問だけ**を強化プロンプトで作り直す→機械QC→設問音声のみAivis無料再生成→再検品）。元の設問は `lv{n}_questions.pre_repair.json` に退避
+
 ## 0-b. 学習機能の拡充（2026-07-25・仕様§6.7・**本番反映済み** コミット `de98fcd`）
 
 3機能を `play/index.html` に実装し、**VPS本番に反映済み**（push → `git merge --ff-only` → `pm2 restart ohanashi`）。本番URLで実レンダリング確認済み（まちがいなおしボタン・252問ロード・SW登録・新関数すべて配信）。
