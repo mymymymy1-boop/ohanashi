@@ -396,7 +396,7 @@ const MOSHI_N = 3;   // 模試で通す お話の数
 const MARU_PATH = "M50 6 C18 4 5 34 8 58 C11 88 44 99 70 94 C96 89 98 54 88 33 C78 14 40 7 40 7";
 const STAMP_RANK = ["🌸","🎏","🎐","⭐","🍡","🏮","🎋","🪁"];
 
-let MANIFEST = [], ALIAS = {}, LABELS = {};
+let MANIFEST = [], ALIAS = {}, LABELS = {}, DEFECTS = [];   // DEFECTS=検品で欠陥確定→出題から除外中
 let cfg = Object.assign({group:"C", level:1, yasashii:true, noise:false, parentRead:false},
                         JSON.parse(localStorage.getItem(CFG_KEY) || "{}"));
 const audio = new Audio();
@@ -416,7 +416,14 @@ Promise.all([
   fetch(CONTENT+"review_manifest.json").then(r=>r.ok?r.json():{items:[]}).catch(()=>({items:[]})),
   fetch(CONTENT+"image_alias_map.json").then(r=>r.ok?r.json():{}).catch(()=>({})),
   fetch(CONTENT+"choice_labels.json").then(r=>r.ok?r.json():{}).catch(()=>({})),
-]).then(([m,a,l])=>{ MANIFEST=m.items||[]; ALIAS=a||{}; LABELS=l||{}; refreshToday(); });
+  fetch(CONTENT+"defect_units.json").then(r=>r.ok?r.json():{units:[]}).catch(()=>({units:[]})),
+]).then(([m,a,l,d])=>{
+  ALIAS=a||{}; LABELS=l||{}; DEFECTS=(d&&d.units)||[];
+  // 検品で欠陥が確定したユニットは出題しない（データは残す＝直したら戻せる）
+  const bad=new Set(DEFECTS);
+  MANIFEST=(m.items||[]).filter(it=>!bad.has(it.unit_id));
+  refreshToday();
+});
 
 function unitsFor(g,l){ return MANIFEST.filter(it=>it.group===g && it.level===l); }
 function refreshToday(){
@@ -852,7 +859,11 @@ function openSettings(){
   pc.checked=!!cfg.parentRead; pc.onchange=(e)=>{ cfg.parentRead=e.target.checked; saveCfg(); };
   updateStock(); show("settings");
 }
-function updateStock(){ document.getElementById("stockInfo").textContent=`いま この設定で ${unitsFor(cfg.group,cfg.level).length}話 あります`; }
+function updateStock(){
+  const el=document.getElementById("stockInfo");
+  el.innerHTML=`いま この設定で <b>${unitsFor(cfg.group,cfg.level).length}話</b> あります`
+    + (DEFECTS.length ? `<br><span style="color:#C9958E">検品で見直し中の ${DEFECTS.length}話 は出題から外しています</span>` : "");
+}
 document.getElementById("setBack").onclick=()=>{ refreshToday(); show("home"); };
 
 // ---------- PWA（オフライン対応） ----------

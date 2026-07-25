@@ -7,9 +7,9 @@
 - **⚠️認証オフ**: VPSの`APP_PASSWORD`が空(旧アプリ時代から)＝`/pro`も`/api`(課金)も未認証公開。泰介さん判断で「今は認証なしのまま」。将来`.env`にAPP_PASSWORD設定→`pm2 restart ohanashi`で全体Basic認証化可。
 - 再デプロイ: `git push`→VPSで`git merge --ff-only origin/master && venv/bin/pip install -qr requirements.txt && pm2 restart ohanashi && pm2 save`。コンテンツ更新はtar-over-ssh(rsync不可)。詳細はメモリ[[ohanashi-deployment]]。
 
-## 0-b. 学習機能の拡充（2026-07-25・仕様§6.7・**ローカル検証済み／本番未反映**）
+## 0-b. 学習機能の拡充（2026-07-25・仕様§6.7・**本番反映済み** コミット `de98fcd`）
 
-3機能を `play/index.html` に実装。**localhost:5000 で検証完了。VPS本番にはまだ反映していない（デプロイはSTOP条件のため承認待ち）。**
+3機能を `play/index.html` に実装し、**VPS本番に反映済み**（push → `git merge --ff-only` → `pm2 restart ohanashi`）。本番URLで実レンダリング確認済み（まちがいなおしボタン・252問ロード・SW登録・新関数すべて配信）。
 - **まちがい直し（変奏復習）**: 誤答を忘却曲線で再出題（翌日→3日→1週間→卒業）。`REVIEW_KEY`にunit_id|q_idで保存。ホームに朱のボタン＋期限到来件数バッジ。復習セッションは**該当設問だけを含む複製ユニット**をキュー化するので既存の出題機構がそのまま動く。結果画面は「のこりNもん」を表示
 - **会場ノイズモード**: WebAudioで合成（**音源ファイル不要**）。低域ノイズ(gain .012)＋鉛筆/椅子のような小さな物音をランダム間隔。本文再生中のみ。設定でON/OFF・既定OFF
 - **親が読むモード**: 音声を使わず原稿（明朝・場面ごと）＋「めやす◯秒・◯字/分」＋進行するペースバー＋「よみおわった→もんだいへ」。設定でON/OFF・既定OFF
