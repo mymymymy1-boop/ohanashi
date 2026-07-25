@@ -214,6 +214,11 @@
   .switch-row{ display:flex; align-items:center; gap:12px; font-size:15px; color:#EAE6DA; }
   .switch-row input{ width:22px; height:22px; accent-color:var(--shu); }
   .stock{ color:#9FB0C9; font-size:14px; }
+  .opt.school{ min-height:46px; font-size:14px; padding:0 13px; }
+  .opt.school .gtag{ font-size:10px; color:#9FB0C9; margin-left:7px; }
+  .opt.school.sel .gtag{ color:#E9B7B1; }
+  .school-note{ margin-top:10px; font-size:13px; color:#9FB0C9; line-height:1.7; }
+  .school-note b{ color:#EAE6DA; }
   .set-back{ min-height:56px; padding:0 22px; border-radius:14px; border:2px solid #ffffff33; background:#ffffff12;
              color:#fff; font-family:var(--maru); font-size:17px; font-weight:700; cursor:pointer; margin-top:8px; }
   .to-report{ min-height:56px; padding:0 22px; border-radius:14px; border:2px solid var(--shu); background:#C9372C22;
@@ -334,8 +339,17 @@
     <div class="set-eyebrow">Setting ・ おうちのかた</div>
     <h2 class="set-title">せってい</h2>
     <p class="set-sub">志望校グループ・レベル・モードをえらべます</p>
-    <div class="field"><label>グループ（志望校タイプ）</label><div class="opts" id="groupOpts"></div></div>
-    <div class="field"><label>レベル</label><div class="opts" id="levelOpts"></div></div>
+    <div class="field">
+      <label>志望校（えらぶと出題タイプが自動で合います・併願は複数可）</label>
+      <div class="opts" id="schoolOpts"></div>
+      <div class="school-note" id="schoolNote"></div>
+    </div>
+    <div class="field"><label id="groupLabel">出題タイプ</label><div class="opts" id="groupOpts"></div></div>
+    <div class="field">
+      <label>レベル</label>
+      <div class="opts" id="levelOpts"></div>
+      <label class="switch-row" style="margin-top:12px"><input type="checkbox" id="autoLvChk"> おまかせ（できに合わせて本番レベルまで自動で上げる）</label>
+    </div>
     <div class="field"><label>モード</label>
       <label class="switch-row"><input type="checkbox" id="yasashiiChk"> やさしいモード（時間1.5倍・本文をもう一度きける）</label>
       <label class="switch-row" style="margin-top:12px"><input type="checkbox" id="noiseChk"> 会場ノイズ（本番の物音を薄く重ねる）</label>
@@ -391,13 +405,27 @@ const GROUPS = [
   {k:"B", name:"B（標準）"}, {k:"D", name:"D（心情・短文3話）"}, {k:"E", name:"E（国立・長文）"},
 ];
 const GROUP_SHORT = {A:"A", B:"B", C:"C", D:"D", E:"E"};
+// 志望校 → 出題タイプ(グループ)の対応。正本は docs/handoff/spec §1.1。
+const SCHOOLS = [
+  {n:"慶應義塾横浜初等部", g:"B"}, {n:"慶應義塾幼稚舎", g:"B"}, {n:"暁星", g:"B"}, {n:"洛南", g:"B"},
+  {n:"桐蔭学園", g:"D"},
+  {n:"森村学園初等部", g:"C"}, {n:"学習院", g:"C"}, {n:"立教", g:"C"}, {n:"成蹊", g:"C"},
+  {n:"早稲田実業", g:"C"}, {n:"立命館", g:"C"}, {n:"同志社", g:"C"}, {n:"関西学院", g:"C"},
+  {n:"雙葉", g:"A"}, {n:"白百合", g:"A"}, {n:"聖心", g:"A"}, {n:"横浜雙葉", g:"A"},
+  {n:"田園調布雙葉", g:"A"}, {n:"東洋英和", g:"A"}, {n:"光塩", g:"A"},
+  {n:"筑波大附属", g:"E"}, {n:"お茶の水女子大附属", g:"E"}, {n:"学芸大附属", g:"E"},
+];
+// 各タイプの「本番相当レベル」= そこまで上げれば入試と同じ長さ・設問数になる目安（仕様§1.2の難易度マトリクス由来）
+const TARGET_LV = {A:5, B:5, C:4, D:5, E:5};
+const GROUP_DESC = {A:"長文精読型", B:"高速処理型", C:"標準バランス型", D:"短文・心情型", E:"国立型"};
 const TIME_LIMIT = {1:20, 2:20, 3:15, 4:15, 5:12};
 const MOSHI_N = 3;   // 模試で通す お話の数
 const MARU_PATH = "M50 6 C18 4 5 34 8 58 C11 88 44 99 70 94 C96 89 98 54 88 33 C78 14 40 7 40 7";
 const STAMP_RANK = ["🌸","🎏","🎐","⭐","🍡","🏮","🎋","🪁"];
 
 let MANIFEST = [], ALIAS = {}, LABELS = {}, DEFECTS = [];   // DEFECTS=検品で欠陥確定→出題から除外中
-let cfg = Object.assign({group:"C", level:1, yasashii:true, noise:false, parentRead:false},
+let cfg = Object.assign({group:"C", level:1, yasashii:true, noise:false, parentRead:false,
+                         schools:[], levelMode:"manual"},
                         JSON.parse(localStorage.getItem(CFG_KEY) || "{}"));
 const audio = new Audio();
 let session = null;
@@ -425,10 +453,52 @@ Promise.all([
   refreshToday();
 });
 
-function unitsFor(g,l){ return MANIFEST.filter(it=>it.group===g && it.level===l); }
+// 志望校が選ばれていれば、その学校のタイプ(併願なら複数)から出題する。未選択なら手動のグループ。
+function activeGroups(){
+  const gs=(cfg.schools||[]).map(n=>(SCHOOLS.find(s=>s.n===n)||{}).g).filter(Boolean);
+  return gs.length ? [...new Set(gs)] : [cfg.group];
+}
+function unitsFor(g,l){
+  const groups = Array.isArray(g) ? g : [g];
+  return MANIFEST.filter(it=>groups.includes(it.group) && it.level===l);
+}
+function poolNow(){ return unitsFor(activeGroups(), cfg.level); }
+// 志望校の本番相当レベル（併願なら最も高いものに合わせる）
+function targetLevel(){
+  const gs=activeGroups();
+  return Math.max(...gs.map(g=>TARGET_LV[g]||5));
+}
 function refreshToday(){
-  document.getElementById("todayTag").textContent = `きょうは ${GROUP_SHORT[cfg.group]||cfg.group}グループ・レベル${cfg.level}`;
+  const el=document.getElementById("todayTag");
+  const schools=cfg.schools||[];
+  if(schools.length){
+    const names = schools.length<=2 ? schools.join("・") : `${schools[0]} ほか${schools.length-1}校`;
+    el.innerHTML = `${esc(names)} コース<br><span style="font-size:13px">レベル${cfg.level}`
+      + (cfg.levelMode==="auto" ? `（おまかせ・本番はレベル${targetLevel()}）` : "") + `</span>`;
+  } else {
+    el.textContent = `きょうは ${GROUP_SHORT[cfg.group]||cfg.group}グループ・レベル${cfg.level}`;
+  }
   refreshReviewBadge();
+}
+
+// おまかせレベル: 直近の成績を見て、本番相当レベルまで少しずつ上げる（下げるときは1段ずつ）
+function autoAdjustLevel(){
+  if(cfg.levelMode!=="auto") return;
+  const hist=loadHist().filter(s=>s.l===cfg.level).slice(-3);
+  if(hist.length<2) return;                       // 判断材料が足りないうちは動かさない
+  let n=0, ok=0;
+  hist.forEach(s=>s.a.forEach(x=>{ n++; ok+=x.c; }));
+  if(!n) return;
+  const rate=ok/n;
+  const before=cfg.level;
+  if(rate>=0.8 && cfg.level<targetLevel()) cfg.level++;
+  else if(rate<0.5 && cfg.level>1) cfg.level--;
+  if(cfg.level!==before){
+    // 在庫が無いレベルには移さない
+    if(!unitsFor(activeGroups(), cfg.level).length){ cfg.level=before; return; }
+    saveCfg();
+    toast(cfg.level>before ? `レベル${cfg.level}に あがったよ！` : `レベル${cfg.level}に もどすね`);
+  }
 }
 
 // ---------- まちがい直し（変奏復習・忘却曲線） ----------
@@ -518,13 +588,13 @@ document.getElementById("calBack").addEventListener("click", ()=>show("home"));
 
 // ---------- セッション ----------
 function startSingle(){
-  const pool = unitsFor(cfg.group, cfg.level);
+  const pool = poolNow();
   if(!pool.length){ toast("この レベルの おはなしが まだ ありません"); return; }
   session = { mode:"single", strict:false, unit: pool[Math.floor(Math.random()*pool.length)], qi:0, answers:[] };
   show("play"); audioUnlock().then(()=>runInstruction());
 }
 function startMoshi(){
-  const pool = unitsFor(cfg.group, cfg.level).slice();
+  const pool = poolNow().slice();
   if(!pool.length){ toast("この レベルの おはなしが まだ ありません"); return; }
   for(let i=pool.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [pool[i],pool[j]]=[pool[j],pool[i]]; }
   const queue = pool.slice(0, Math.min(MOSHI_N, pool.length));
@@ -679,6 +749,7 @@ function completeUnit(){
   const ans=session.answers, n=ans.length, ok=ans.filter(a=>a.correct).length, perfect=ok===n;
   recordDay(perfect, ok, n);
   recordHistory(session.unit.group, session.unit.level, ans);
+  if(session.mode==="single") autoAdjustLevel();   // おまかせレベルは通常練習でのみ動かす
   if(session.mode==="moshi" || session.mode==="review"){
     session.results.push({theme:session.unit.theme, ok, n});
     session.ui++;
@@ -846,13 +917,53 @@ function clearHold(){ hold.classList.remove("holding"); clearTimeout(holdTimer);
   holdTimer=setTimeout(()=>{ gate.classList.remove("show"); clearHold(); openSettings(); }, 1600);
 }));
 ["mouseup","touchend","touchcancel","mouseleave"].forEach(ev=>hold.addEventListener(ev,clearHold));
-function openSettings(){
+function renderSchoolPicker(){
+  const so=document.getElementById("schoolOpts");
+  so.innerHTML=SCHOOLS.map(s=>{
+    const on=(cfg.schools||[]).includes(s.n);
+    return `<button class="opt school ${on?"sel":""}" data-s="${esc(s.n)}">${esc(s.n)}<span class="gtag">${GROUP_DESC[s.g]}</span></button>`;
+  }).join("");
+  so.querySelectorAll(".opt").forEach(b=>b.onclick=()=>{
+    const n=b.dataset.s, list=new Set(cfg.schools||[]);
+    if(list.has(n)) list.delete(n); else list.add(n);
+    cfg.schools=[...list];
+    const gs=activeGroups();
+    if(cfg.schools.length){
+      cfg.group=gs[0];                                   // 手動グループも併せておく（後方互換）
+      if(cfg.level>targetLevel()) cfg.level=targetLevel();
+    }
+    saveCfg(); renderSchoolPicker(); renderGroupLevel(); updateStock();
+  });
+  const note=document.getElementById("schoolNote");
+  if((cfg.schools||[]).length){
+    const gs=activeGroups();
+    note.innerHTML=`出題タイプ <b>${gs.map(g=>GROUP_DESC[g]).join("・")}</b> ／ 本番相当は <b>レベル${targetLevel()}</b>`
+      + (cfg.levelMode==="auto" ? `<br>いまは レベル${cfg.level}。できに合わせて自動で上げていきます。` : "");
+  } else {
+    note.innerHTML="志望校をえらばない場合は、下の出題タイプを手動でえらべます。";
+  }
+}
+function renderGroupLevel(){
   const go=document.getElementById("groupOpts"), lo=document.getElementById("levelOpts");
-  go.innerHTML=GROUPS.map(g=>`<button class="opt ${cfg.group===g.k?"sel":""}" data-g="${g.k}">${esc(g.name)}</button>`).join("");
+  const auto=(cfg.schools||[]).length>0;
+  const gs=activeGroups();
+  document.getElementById("groupLabel").textContent = auto ? "出題タイプ（志望校から自動）" : "出題タイプ";
+  go.innerHTML=GROUPS.map(g=>`<button class="opt ${gs.includes(g.k)?"sel":""}" data-g="${g.k}" ${auto?"disabled style=\"opacity:.55\"":""}>${esc(g.name)}</button>`).join("");
   lo.innerHTML=[1,2,3,4,5].map(l=>`<button class="opt ${cfg.level===l?"sel":""}" data-l="${l}">Lv${l}</button>`).join("");
+  if(!auto){
+    go.querySelectorAll(".opt").forEach(b=>b.onclick=()=>{ cfg.group=b.dataset.g; saveCfg();
+      go.querySelectorAll(".opt").forEach(x=>x.classList.remove("sel")); b.classList.add("sel"); updateStock(); });
+  }
+  lo.querySelectorAll(".opt").forEach(b=>b.onclick=()=>{ cfg.level=+b.dataset.l; saveCfg();
+    lo.querySelectorAll(".opt").forEach(x=>x.classList.remove("sel")); b.classList.add("sel");
+    renderSchoolPicker(); updateStock(); });
+}
+function openSettings(){
+  renderSchoolPicker(); renderGroupLevel();
   document.getElementById("yasashiiChk").checked=!!cfg.yasashii;
-  go.querySelectorAll(".opt").forEach(b=>b.onclick=()=>{ cfg.group=b.dataset.g; saveCfg(); go.querySelectorAll(".opt").forEach(x=>x.classList.remove("sel")); b.classList.add("sel"); updateStock(); });
-  lo.querySelectorAll(".opt").forEach(b=>b.onclick=()=>{ cfg.level=+b.dataset.l; saveCfg(); lo.querySelectorAll(".opt").forEach(x=>x.classList.remove("sel")); b.classList.add("sel"); updateStock(); });
+  const al=document.getElementById("autoLvChk");
+  al.checked = cfg.levelMode==="auto";
+  al.onchange=(e)=>{ cfg.levelMode = e.target.checked ? "auto" : "manual"; saveCfg(); renderSchoolPicker(); };
   document.getElementById("yasashiiChk").onchange=(e)=>{ cfg.yasashii=e.target.checked; saveCfg(); };
   const nc=document.getElementById("noiseChk"), pc=document.getElementById("parentReadChk");
   nc.checked=!!cfg.noise;  nc.onchange=(e)=>{ cfg.noise=e.target.checked; saveCfg(); };
@@ -861,7 +972,7 @@ function openSettings(){
 }
 function updateStock(){
   const el=document.getElementById("stockInfo");
-  el.innerHTML=`いま この設定で <b>${unitsFor(cfg.group,cfg.level).length}話</b> あります`
+  el.innerHTML=`いま この設定で <b>${poolNow().length}話</b> あります`
     + (DEFECTS.length ? `<br><span style="color:#C9958E">検品で見直し中の ${DEFECTS.length}話 は出題から外しています</span>` : "");
 }
 document.getElementById("setBack").onclick=()=>{ refreshToday(); show("home"); };
