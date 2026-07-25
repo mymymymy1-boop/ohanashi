@@ -5,8 +5,13 @@
 audio_cache/
 packs/
 
-# 使用ログ
+# 使用ログ・サーバーログ
 usage_log.csv
+app_server.log
+
+# 開発中の一時スクショ（scratchpad外に紛れたもの）
+shot_*.png
+v3_*.png
 
 # ブラウザ自動操作の一時スクショ・認証状態
 .tmp_shots/
@@ -17,3 +22,6 @@ __pycache__/
 *.pyc
 venv/
 .venv/
+
+# お話の記憶 PRO パイロット生成物（音声含む・容量大のためgit管理外）
+content/

@@ -1,0 +1,17 @@
+{
+  "name": "お話の記憶",
+  "short_name": "おはなし",
+  "description": "小学校受験「お話の記憶」の本番練習アプリ",
+  "lang": "ja",
+  "start_url": "/pro/play",
+  "scope": "/pro/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F3ECDC",
+  "theme_color": "#F3ECDC",
+  "icons": [
+    { "src": "/pro/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/pro/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/pro/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -1,0 +1,7 @@
+# お話の記憶 PRO パイプライン専用の依存 (ローカル実行のみ。Render本番アプリには不要)
+# インストール: python -m pip install -r pipeline/requirements-pipeline.txt
+anthropic>=0.97.0
+pydantic>=2.7
+mutagen>=1.47
+requests>=2.32
+python-dotenv>=1.0

@@ -1,0 +1,152 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "story_skeleton": {
+      "type": "object",
+      "required": ["skeleton_id", "group", "max_level", "theme", "season", "characters", "scenes"],
+      "properties": {
+        "skeleton_id": {"type": "string", "pattern": "^sk_[0-9]{8}_[0-9]{4}$"},
+        "group": {"enum": ["A", "B", "C", "D", "E"]},
+        "max_level": {"type": "integer", "minimum": 1, "maximum": 5},
+        "theme": {"type": "string"},
+        "season": {"enum": ["haru", "natsu", "aki", "fuyu"]},
+        "weather": {"enum": ["hare", "kumori", "ame", "yuki", null]},
+        "seed_note": {"type": "string"},
+        "characters": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+              "id": {"type": "string"},
+              "display": {"type": "string", "description": "うさぎさん 等の呼称"},
+              "attrs": {
+                "type": "object",
+                "properties": {
+                  "hat_color": {"enum": ["aka", "ao", "kiiro", "midori"]},
+                  "item": {"type": "string"},
+                  "item_color": {"enum": ["aka", "ao", "kiiro", "midori"]}
+                }
+              }
+            }
+          }
+        },
+        "mentioned_absent": {"type": "array", "items": {"type": "string"}},
+        "scenes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "required": ["seq", "chars", "event"],
+            "properties": {
+              "seq": {"type": "integer", "minimum": 1},
+              "chars": {"type": "array", "items": {"type": "string"}},
+              "event": {"type": "string"},
+              "order_key": {"type": "string"},
+              "numbers": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 5}},
+              "season_cue": {"type": "string"},
+              "life_common_sense": {"type": "string"}
+            }
+          }
+        },
+        "dual_orders": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}},
+        "quotes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["speaker", "text_key"],
+            "properties": {"speaker": {"type": "string"}, "text_key": {"type": "string"}}
+          }
+        },
+        "state_changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["obj", "from", "to"],
+            "properties": {"obj": {"type": "string"}, "from": {"type": "string"}, "to": {"type": "string"}}
+          }
+        },
+        "emotions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["char", "emotion"],
+            "properties": {
+              "char": {"type": "string"},
+              "emotion": {"enum": ["ureshii", "kanashii", "okotta", "bikkuri", "sabishii", "waku waku"]},
+              "then": {"enum": ["ureshii", "kanashii", "okotta", "bikkuri", "sabishii", "waku waku", null]},
+              "cause": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "story_text": {
+      "type": "object",
+      "required": ["skeleton_id", "level", "group", "scenes_text", "char_count", "expected_duration_sec"],
+      "properties": {
+        "skeleton_id": {"type": "string"},
+        "level": {"type": "integer", "minimum": 1, "maximum": 5},
+        "group": {"enum": ["A", "B", "C", "D", "E"]},
+        "scenes_text": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["seq", "text"],
+            "properties": {"seq": {"type": "integer"}, "text": {"type": "string"}}
+          }
+        },
+        "char_count": {"type": "integer"},
+        "expected_duration_sec": {"type": "number"},
+        "scene_boundaries": {"type": "array", "items": {"type": "integer"}},
+        "new_vocab": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {"word": {"type": "string"}, "gloss": {"type": "string"}}
+          }
+        },
+        "speech_rate_cpm": {"type": "integer", "description": "想定話速(字/分)"}
+      }
+    },
+    "question": {
+      "type": "object",
+      "required": ["q_id", "skeleton_id", "level", "type", "instruction", "prompt_text", "correct", "choices", "time_limit_sec"],
+      "properties": {
+        "q_id": {"type": "string"},
+        "skeleton_id": {"type": "string"},
+        "level": {"type": "integer", "minimum": 1, "maximum": 5},
+        "type": {"enum": ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10"]},
+        "instruction": {
+          "type": "object",
+          "required": ["mark", "color", "multi"],
+          "properties": {
+            "mark": {"enum": ["maru", "sankaku", "shikaku", "batsu"]},
+            "color": {"enum": ["aka", "ao", "midori", "kuro"]},
+            "multi": {"type": "boolean"}
+          }
+        },
+        "prompt_text": {"type": "string", "description": "ひらがな設問文(音声化対象)"},
+        "correct": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "choices": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "required": ["id", "image_key", "dummy_kind"],
+            "properties": {
+              "id": {"type": "string"},
+              "image_key": {"type": "string"},
+              "dummy_kind": {"enum": ["strong", "category", "numeric", "attribute_swap", "scene_composite", "emotion_set", null]}
+            }
+          }
+        },
+        "time_limit_sec": {"type": "integer"},
+        "evidence_scene_seq": {"type": "array", "items": {"type": "integer"}, "description": "根拠場面(苦手分析用)"}
+      }
+    }
+  }
+}

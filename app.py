@@ -616,6 +616,66 @@ def api_pack_download():
         return jsonify({"error": "ファイルが見つかりません"}), 404
     return send_file(path, mimetype="text/html", as_attachment=True, download_name=name)
 
+# ---------------- お話の記憶 PRO (P1) 検品キュー ----------------
+# 新機能は /pro/ 名前空間に隔離し、既存アプリのルート・データには触れない(P1実装上の注意)。
+PRO_CONTENT_DIR = BASE / "content" / "pilot"
+PRO_REVIEW_DIR = BASE / "review"
+PRO_PLAY_DIR = BASE / "play"
+
+@app.route("/pro/review")
+def pro_review():
+    if not (PRO_REVIEW_DIR / "index.html").exists():
+        return jsonify({"error": "検品キューがまだ生成されていません"}), 404
+    return send_from_directory(str(PRO_REVIEW_DIR), "index.html")
+
+@app.route("/pro/play")
+def pro_play():
+    # こども本番モード(P2 MVP)。検品済みコンテンツを本番作法で出題する。
+    # 配信データは既存の /pro/content/ をそのまま使う(manifest・画像・音声・alias・labels)。
+    if not (PRO_PLAY_DIR / "index.html").exists():
+        return jsonify({"error": "プレイ画面がまだありません"}), 404
+    return send_from_directory(str(PRO_PLAY_DIR), "index.html")
+
+@app.route("/pro/sw.js")
+def pro_sw():
+    # Service Worker は /pro/ スコープで配信(旧アプリ / には干渉しない)。
+    if not (PRO_PLAY_DIR / "sw.js").exists():
+        return jsonify({"error": "sw.js がありません"}), 404
+    resp = send_from_directory(str(PRO_PLAY_DIR), "sw.js", mimetype="application/javascript")
+    resp.headers["Service-Worker-Allowed"] = "/pro/"
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+@app.route("/pro/play.webmanifest")
+def pro_webmanifest():
+    if not (PRO_PLAY_DIR / "play.webmanifest").exists():
+        return jsonify({"error": "manifest がありません"}), 404
+    return send_from_directory(str(PRO_PLAY_DIR), "play.webmanifest",
+                               mimetype="application/manifest+json")
+
+@app.route("/pro/icon-<size>.png")
+def pro_icon(size):
+    # PWA/ホーム画面アイコン。size はサニタイズしてファイル名固定パターンに閉じる。
+    fn = "icon-" + os.path.basename(size) + ".png"
+    if not (PRO_PLAY_DIR / fn).exists():
+        return jsonify({"error": "icon がありません"}), 404
+    return send_from_directory(str(PRO_PLAY_DIR), fn, mimetype="image/png")
+
+@app.route("/pro/content/<path:relpath>")
+def pro_content(relpath):
+    # パストラバーサル対策: 解決後パスが content/pilot 配下であることを検証する。
+    root = PRO_CONTENT_DIR.resolve()
+    try:
+        path = (root / relpath).resolve()
+    except (OSError, ValueError):
+        return jsonify({"error": "不正なパスです"}), 400
+    if not (path == root or root in path.parents) or not path.is_file():
+        return jsonify({"error": "ファイルが見つかりません"}), 404
+    mimetype = "audio/mpeg" if path.suffix == ".mp3" else None
+    resp = send_file(path, mimetype=mimetype)
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
 # ---------------- 静的ファイル ----------------
 @app.route("/")
 def index():

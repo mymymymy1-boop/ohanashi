@@ -1,0 +1,65 @@
+# HANDOFF — ohanashi（お話の記憶アプリ + PRO）
+
+## 0. 最新状態（2026-07-25・4択統一＋絵カード全解決）
+
+**「お話の記憶PRO」252問1279設問を全数4択に統一（泰介指示「実試験は4択が主流」）。絵カード欠落も0になり、残るゲートは泰介検品のみ。**
+
+- 4択化: `pipeline/normalize_choices.py`（5択546トリム/3択65追加/R308修正3）。CHOICE_COUNT全Lv(4,4)・models choices=4固定・R302統一・仕様/プロンプト03/qc_rules同期済み。旧データ=`content/_backup_pre4choice_20260725`。音声・本文は無変更
+- 絵カード11種解消: 目視判定で復活3（takigi_3bon等・QC誤検知）＋alias1（hare→tenki_hare）＋Gemini再生成7（全数目視合格・strip_frame済み）。マニフェスト画像欠落0・HTTP 11/11確認済み
+- QC: 380ユニット中374合格（残6failは移行前からの既知・全て検品対象外）。回帰テスト18/18
+- **こども本番モードMVP実装（2026-07-25・P2後半の第一歩）**: `/pro/play`（`play/index.html`）。指示→本文(波形のみ・1回きり)→設問(4択タップ・2段階けってい・制限時間リング)→朱の○採点→自動送り→けっか→がんばりカレンダー(localStorage)。親ゲート(長押し1.5秒)→グループ/レベル/やさしいモード設定。検品済み252問をそのまま出題。
+- **P2機能3点セット実装（2026-07-25・泰介さん「全部今日」指示）**:
+  - **スタンプ帳・バッジ**: がんばり画面を「がんばりの きろく」に拡張。連続日数バナー＋朱丸/花丸カレンダー＋スタンプ帳(1問=1スタンプ・10個で1ページ・ボーナス縁起物)＋バッジ6種(はじめての満点/7日/30日連続/100問/500問/Lv3クリア・記録から自動判定)。
+  - **模試モード**: ホーム「🎯 もぎしけん」。同グループ・レベルから最大3話を`strict`(やさしいモード無効・本文1回・タイマー本番)で連続出題→per-story内訳＋合計判定。`completeUnit`で単発/模試を分岐(単発=showSingleResult, 模試=次話へ/showMoshiResult)。
+  - **PWA化**: `play/play.webmanifest`・`play/sw.js`(スコープ/pro/限定・旧アプリ無干渉・シェルはネット優先/画像音声はキャッシュ優先でオフライン再生)・`play/icon-{192,512}.png`(朱丸+明朝「話」)。app.pyに`/pro/sw.js`(Service-Worker-Allowed:/pro/)・`/pro/play.webmanifest`・`/pro/icon-<size>.png`追加。SW登録スコープ/pro/確認済。
+  - 検証: test_client全30項目PASS(ルート・PWA・パストラバーサル防御・4択維持)＋agent-browserでホーム/がんばり(スタンプ28個2ページ・バッジ獲得ロック判定)/模試結果/単発結果を実レンダリング確認。**サーバー再起動済(新ルート反映)**。
+- **親ゾーンに本物の成績表を実装（2026-07-25）**: おうちのかた設定→「📊 せいせきを みる」で濃紺の成績表。プレイ完了ごとに`recordHistory`が per-answer(type,correct)をlocalStorage(`ohanashi_play_history_v1`・上限300)に記録→**記録から算出**したタイプ別正答率(にがて=60%未満を朱で強調・低い順)・総練習数・総正答率・連続日数(calから)・直近12回の推移を表示。空状態あり。**場面別ヒートマップは骨格→場面の対応が全設問で取れないため意図的に未実装(捏造しない)**。agent-browserで空/データ/一気通貫(finishSession→記録→表示)を実レンダリング検証済み。
+- **UI一新「答案用紙メソッド」を本番反映（2026-07-25・泰介さん「これで以降」承認）**: わら半紙罫線＋濃紺＋朱の採点丸、手描き朱丸のシグネチャー、解答欄マス目、明朝ブランド、親ゾーンは濃紺に反転。**agent-browserで全6画面を実レンダリング目視検証**（表紙/きく/もんだい/採点朱丸/けっか花丸/カレンダー/親設定）。検証中に発見・修正した2件: ①`.grade`採点丸が`[hidden]`をCSSが打ち消し全カード表示→クラスベース表示に修正 ②置いた印を手描きSVG○に強化＋採点後は子の印を隠す。ルート＋データはtest_client実HTTP全PASS。**残る唯一の未検証はブラウザでの音声自動再生フロー（iOS自動再生ロック）＝要泰介さん実機確認**。サーバーはsend_from_directoryで都度ファイル読込のため再起動不要→ http://192.168.0.242:5000/pro/play
+
+- 検品UI: サーバー起動後 `http://192.168.0.242:5000/pro/review`（252問・グループバッジ・絵カードグリッド・ひらがなラベル）
+- サーバー: `cd C:\dev\ohanashi && python app.py`（ローカルは認証なし）
+- 音声エンジン: `C:\dev\_tools\Windows-x64\run.exe --host 127.0.0.1 --port 10101`（AivisSpeech。Smart App Controlはオフ済み）
+- 総コスト: API $134.5 + 画像 ≈$70
+
+## 1. 現在のタスク
+
+P2（仕様 `docs/handoff/spec/ohanashi_pro_spec_v1.1.md` §11）のコンテンツ目標「250問ストック」達成。
+次は (1) 泰介検品 → NG系統修正 → (2) P2残りのアプリ機能（本番再現UI・こどもモード・カレンダー・ペアレンタルゲート）の設計。
+
+## 2. 直近セッションで完了（2026-07-22〜24）
+
+- **音声**: 本文=morioki 1.25倍速焼き込み（`STORY_SPEED_FACTOR=1.25` in `pipeline/common.py`・R205も目標基準）／設問=TANAKA。AivisSpeechで生成0円
+- **量産**: グループA/B/D/E各50問（run_pilot --group X --new 15 → 補完パス --new 0）。Lv5プロンプト強化・R504骨格事前検証・32000トークン・修復不能骨格スキップ
+- **グループD専用軸を新規実装**（泰介承認）: 話数{1,1,2,2,3}・設問数{1..5}・T5≥50%・T2/T9禁止・multi免除。`common.py D_*` / `qc.py` D分岐 / プロンプト3本
+- **絵カード1656枚**: `pipeline/image_vocab.py`(語彙正規化1752→1680) → `build_image_lib.py`(AI生成+視覚QC+枠切除) → `image_render.py`(個数=機械合成・数字=ドット)。カバレッジ99.8%
+- **検品UI**: 絵カードグリッド・ひらがなラベル（`pipeline/choice_labels.py`）・グループバッジ・マニフェストのマージ化
+
+## 3. 次にやること
+
+1. **`/pro/play` を泰介さん実機確認**（iPad/スマホでブラウザ音声再生フローが通るか。iOS自動再生ロックが未検証の最大リスク。落ちる場合は「指示音声→本文」の遷移を各ステップ手動タップ起点に変更する）
+2. 泰介検品（各グループ5問サンプルから。特にD=3話連続・E=長文）→ UIメモ→「JSON書き出し」で回収
+3. 検品NGの系統修正（プロンプト正本は `docs/handoff/prompts/`）
+4. MVPの次の詰め（実機確認後）: クーピー色パレットで記号を「置く」操作／読み上げ後の設問文自動送り微調整／スタンプ帳・マイルストーンバッジ／模試モード。オフライン化(PWA/Capacitor)・課金はP3
+
+## 4. 重要な決定・制約
+
+- 本文音声は**1.25倍速をファイルに焼き込み**（プレイヤーは等倍再生）。泰介耳判定・qc_rules.mdにも同期済み
+- 絵柄の正本 = `pipeline/gen_images.py` の `STYLE_PREFIX`（泰介承認の水彩パステル）。変更はそこだけ
+- 個数カードはAI描画禁止（機械合成のみ）。image_key命名規約は `docs/handoff/prompts/03_question_gen.md` に明記
+- 長時間バッチは detached起動+Monitor監視（バックグラウンドkillはpython残存→エンジン渋滞の事故歴）
+- 実行中プロセスがある間はpipelineコードを編集しない／書き込み先フォルダを動かさない（クラッシュ事故歴）
+
+## 5. 主要ファイル
+
+- パイプライン: `pipeline/` — run_pilot(一括) / generate / qc / audio / tts_aivis / gen_images / image_vocab / image_render / image_qc / build_image_lib / choice_labels
+- コンテンツ: `content/pilot/`（review_manifest.json=252問 / images/=1656枚+gallery.html / image_vocab.json / image_alias_map.json / choice_labels.json / qc_report.jsonl / images_needs_human.json）
+- 検品UI: `review/index.html`（/pro/review で配信）
+- 仕様正本: `docs/handoff/`（spec / prompts×3 / qc_rules）
+- 回帰テスト: `python test_p1_qc.py`（18/18）
+
+## 6. 未解決・ブロッカー
+
+- 泰介検品待ち（品質の最終判定は人間の耳と目）
+- 絵カード11種が未生成（複合場面系・影響は各1選択肢のみ）
+- PRO問題の本番アプリ（こども向けUI）への組み込みは未設計（P2後半）
+- 旧単体アプリ（Render公開版）は無変更で稼働中（このセッションでは触っていない）
