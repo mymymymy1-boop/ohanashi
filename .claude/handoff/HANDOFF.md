@@ -50,7 +50,9 @@
 
 - 検品UI: サーバー起動後 `http://192.168.0.242:5000/pro/review`（252問・グループバッジ・絵カードグリッド・ひらがなラベル）
 - サーバー: `cd C:\dev\ohanashi && python app.py`（ローカルは認証なし）
-- 音声エンジン: `C:\dev\_tools\Windows-x64\run.exe --host 127.0.0.1 --port 10101`（AivisSpeech。Smart App Controlはオフ済み）
+- 音声エンジン: `C:\dev\_tools\Windows-x64\run.exe --host 127.0.0.1 --port 10101`（AivisSpeech）
+  - **2026-07-25: エンジンのライフサイクルをパイプラインに内蔵**（`pipeline/tts_aivis.py`）。`python -m pipeline.audio` は `engine_session()` で囲まれ、**終了時（例外・Ctrl-Cでも finally で）必ずエンジンを停止**する。放置で18.8GB/2.7GBを占有しPCが逼迫した実害への対策。停止は実行ファイルのフルパス一致でPID特定（同名の別run.exeを巻き添えにしない・テスト済）。挙動は `AIVIS_STOP_POLICY`（既定`always` / `auto`=自分で起動した分だけ / `never`）で変更可。
+  - **Smart App Controlが再びオン（強制）になっており、未署名のrun.exeはPython/PowerShellから起動できない**（WinError 4551・2026-07-25確認）。そのため**エンジンは人が手動で起動する必要がある**（自動起動コードは実装済みで、SACをオフにすれば自動で立ち上がる）。SACはセキュリティ設定のためスクリプトからは変更しない。
 - 総コスト: API $134.5 + 画像 ≈$70
 
 ## 1. 現在のタスク

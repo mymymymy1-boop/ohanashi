@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import io
 import json
 import sys
@@ -275,25 +276,39 @@ def main():
         print("--select / --units / --all のいずれかを指定してください。")
         return
 
+    if not targets:
+        print("対象ユニットがありません（指定を確認してください）。")
+        return
+
     total_chars = 0
     done = []
-    for skel_dir, level in targets:
-        uid = f"{skel_dir.name}_lv{level}"
-        print(f"[audio] {uid}", flush=True)
-        try:
-            # aivisはspeedScaleが正確&再生成0円のため常に話速補正を有効化
-            r = build_audio_for_unit(skel_dir, level,
-                                     rate_adjust=args.rate_adjust or TTS_BACKEND == "aivis")
-        except Exception as e:
-            print(f"  失敗: {e}", flush=True)
-            continue
-        _update_cost(skel_dir, level, r["tts_chars"])
-        total_chars += r["tts_chars"]
-        if r["status"] == "pass":
-            done.append(uid)
-        else:
-            print(f"  音声QC不合格のまま: {uid}", flush=True)
-            done.append(uid)  # 検品キューには載せて人間判定に回す
+    # aivisバックエンドではエンジンの起動〜終了をこのブロックが持つ。
+    # 放置されたエンジンは数GB〜十数GBを占有し続ける（2026-07-24/25に実際に発生）ため、
+    # 例外・Ctrl-Cで抜けても engine_session の finally が必ず終了させる。
+    if TTS_BACKEND == "aivis":
+        from pipeline.tts_aivis import engine_session
+        engine_ctx = engine_session()
+    else:
+        engine_ctx = contextlib.nullcontext()
+
+    with engine_ctx:
+        for skel_dir, level in targets:
+            uid = f"{skel_dir.name}_lv{level}"
+            print(f"[audio] {uid}", flush=True)
+            try:
+                # aivisはspeedScaleが正確&再生成0円のため常に話速補正を有効化
+                r = build_audio_for_unit(skel_dir, level,
+                                         rate_adjust=args.rate_adjust or TTS_BACKEND == "aivis")
+            except Exception as e:
+                print(f"  失敗: {e}", flush=True)
+                continue
+            _update_cost(skel_dir, level, r["tts_chars"])
+            total_chars += r["tts_chars"]
+            if r["status"] == "pass":
+                done.append(uid)
+            else:
+                print(f"  音声QC不合格のまま: {uid}", flush=True)
+                done.append(uid)  # 検品キューには載せて人間判定に回す
 
     write_review_manifest(content_dir, done)
     print(f"\n音声生成完了: {len(done)}ユニット / TTS課金 {total_chars}字", flush=True)
