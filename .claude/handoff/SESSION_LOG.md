@@ -55,3 +55,35 @@
 ### 保存（2026-07-24）
 - MyBrain: 02_Projects/ohanashi-app.md 現在地更新、03_Knowledge/ai-content-mass-production.md 新規。
 - リポジトリ: 本HANDOFF.md全面更新。auto-memory ohanashi-pro-p1.md 随時更新済み。
+
+## 2026-07-25 4択統一 → こども本番モード → UI一新 → 機能拡充 → VPS本番公開
+
+### 経緯・合意（ユーザー指示の流れ）
+- 「だいたい4択が多いから4択にして」→ 全252問1279設問を4択に統一。
+- 「推奨で」→ 案A（こども本番モードMVP先行）を承認・着手。
+- 「今回実装するアプリのUIも一新したい」→ 3方向を提示→A統合案「答案用紙メソッド」→モック提示→「ナイス。これで以降」で本番反映承認。
+- 「全部今日続けてやって」→ スタンプ帳/バッジ・模試モード・PWA化の3点を同日実装。
+- 「次のフェーズへ」→ 選択肢提示→**「本番公開の準備」**を選択。認証方針は最終的に**「今は認証なしのまま」**を選択（課金EP公開の理解の上で）。
+
+### 実行と結果
+- **4択統一**: `pipeline/normalize_choices.py` 新規。5択546トリム(QC必須ダミー保護)/3択65追加(T2=数値カード機械追加, T1/T3=LLM選定)/multi 4of5→3of4を13件/R308修正3。SSOT連動=common.py・models・qc.py・仕様書・プロンプト03・qc_rules。回帰18/18。旧データ=content/_backup_pre4choice_20260725。
+- **絵カード11種解消**: 実体は視覚QC隔離。目視判定で復活3＋alias1＋Gemini再生成7（全数目視合格）→ manifest画像欠落0。
+- **こども本番モード**: `/pro/play`（play/index.html）＋app.pyルート。指示→本文1回→4択→2段階けってい→朱の採点丸→けっか。
+- **UI一新（答案用紙メソッド）**: わら半紙/濃紺/朱丸/明朝、親ゾーン濃紺反転。モック artifact 1e44273f。
+- **機能拡充**: 成績表（履歴から算出・タイプ別にがて分析／場面別ヒートマップは算出不能につき意図的に未実装）、がんばりの記録（連続日数・スタンプ帳・バッジ6種）、模試モード（3話連続・strict）、PWA（manifest/sw.js＝/pro/スコープ限定/アイコン）。
+- **VPS本番公開**: コミット `f8eb935` push → VPS `git merge --ff-only` → pip → `pm2 restart ohanashi`。コンテンツ1.9GBを**tar-over-ssh**で転送（画像1681・mp3 1531・manifest252）。**https://ohanashi.bizsp.net/pro/play** 稼働。
+
+### 検証（実物確認）
+- test_client 実HTTP: v2/v3で全項目PASS（ルート・PWA配信・Content-Type・パストラバーサル防御・全4択維持・括弧均衡）。
+- agent-browser 実レンダリング: ホーム/きく/もんだい/朱丸採点/けっか/カレンダー/親設定/成績表(空・データ)/スタンプ・バッジ/模試結果。
+- 本番HTTPS: 全 `/pro/*` 200・SWスコープヘッダ・PWA成立を実測。
+
+### 検証中に発見・修正したもの
+- `.grade` の朱丸が全カードに表示 → 作者CSSの `display` がUAの `[hidden]` に勝つため。クラス制御へ修正。
+- 置いた印が弱い → 手描きSVG○（クーピー色）に強化＋採点後は子の印を隠す。
+- **【重要】VPSの `APP_PASSWORD` が空＝旧アプリ時代から無認証公開**（`/api/story`・`/api/tts` の課金EPを含む）。Renderのフェイルクローズドは `RENDER` 環境変数依存でVPSでは無効。→ 報告し、泰介さん判断で当面このまま。
+
+### 保存（2026-07-25）
+- MyBrain: `02_Projects/ohanashi-app.md`（2026-07-25の現在地/Next Actionを先頭に追加・frontmatter description更新・公開状況にVPS移行注記）、`03_Knowledge/vps-python-app-deploy.md`（gunicorn+PM2実例・tar-over-ssh・フェイルクローズドの罠を追記）。
+- リポジトリ: HANDOFF.md 先頭を「VPS本番公開完了」に更新、本SESSION_LOG追記。
+- auto-memory: `ohanashi-deployment.md`（VPS公開セクション新設）、`ohanashi-pro-p1.md`（4択統一・UI一新・3点セット・成績表を追記）。

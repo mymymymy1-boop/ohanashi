@@ -130,6 +130,25 @@
   .kettei:active{ transform:translateY(3px); box-shadow:0 2px 0 var(--shu-ink); }
   .kettei:disabled{ background:#c7bda6; box-shadow:0 5px 0 #b0a68e; cursor:default; }
 
+  /* ---- まちがい直し（バッジ付きボタン） ---- */
+  .review-btn{ position:relative; font-family:var(--maru); font-weight:800; font-size:18px; color:var(--shu);
+               background:#fff; border:2px solid var(--shu); border-radius:16px; padding:14px 30px;
+               min-height:56px; cursor:pointer; }
+  .review-btn .n{ position:absolute; top:-9px; right:-9px; min-width:28px; height:28px; padding:0 6px;
+                  border-radius:999px; background:var(--shu); color:#fff; font-size:14px; font-weight:800;
+                  display:grid; place-items:center; font-variant-numeric:tabular-nums; }
+  .review-btn.none{ color:var(--ink-soft); border-color:rgba(32,48,79,.2); }
+
+  /* ---- 親が読むモード ---- */
+  .read-pane{ flex:1; display:flex; flex-direction:column; gap:14px; padding:16px; overflow:auto; }
+  .read-head{ font-family:var(--maru); font-size:16px; font-weight:800; color:var(--navy); text-align:center; }
+  .read-meta{ display:block; font-size:13px; color:var(--ink-soft); font-weight:700; margin-top:5px; }
+  .read-body{ background:#fffdf8; border:1px solid rgba(32,48,79,.16); border-radius:14px; padding:16px; }
+  .read-scene{ font-family:var(--serif); font-size:19px; line-height:2.1; color:var(--ink); margin-bottom:14px; }
+  .read-scene:last-child{ margin-bottom:0; }
+  .pace{ height:10px; border-radius:6px; background:rgba(32,48,79,.12); overflow:hidden; }
+  .pace i{ display:block; height:100%; width:0; background:var(--shu); border-radius:6px; }
+
   /* ---- けっか ---- */
   #result{ align-items:center; justify-content:center; text-align:center; }
   .result-body{ position:relative; z-index:1; display:flex; flex-direction:column; align-items:center; gap:18px; padding:24px; width:100%; max-width:420px; }
@@ -259,6 +278,7 @@
     <div class="today" id="todayTag"></div>
     <button class="start" id="startBtn">はじめる<span class="dot"></span></button>
     <button class="moshi-btn" id="moshiBtn">🎯 もぎしけん</button>
+    <button class="review-btn" id="reviewBtn">🔁 まちがいなおし<span class="n" id="reviewN">0</span></button>
     <div class="home-foot">
       <button id="calBtn">🌸 がんばり</button>
       <button id="gearBtn">⚙ おうちのかた</button>
@@ -318,6 +338,8 @@
     <div class="field"><label>レベル</label><div class="opts" id="levelOpts"></div></div>
     <div class="field"><label>モード</label>
       <label class="switch-row"><input type="checkbox" id="yasashiiChk"> やさしいモード（時間1.5倍・本文をもう一度きける）</label>
+      <label class="switch-row" style="margin-top:12px"><input type="checkbox" id="noiseChk"> 会場ノイズ（本番の物音を薄く重ねる）</label>
+      <label class="switch-row" style="margin-top:12px"><input type="checkbox" id="parentReadChk"> おうちのかたが読む（音声を使わず原稿とペースを表示）</label>
     </div>
     <div class="field stock" id="stockInfo"></div>
     <button class="to-report" id="toReport">📊 せいせきを みる</button>
@@ -355,6 +377,9 @@ const CONTENT = "/pro/content/";
 const CFG_KEY = "ohanashi_play_cfg_v1";
 const CAL_KEY = "ohanashi_play_calendar_v1";
 const HIST_KEY = "ohanashi_play_history_v1";
+const REVIEW_KEY = "ohanashi_play_review_v1";
+const REVIEW_STEPS = [1, 3, 7];   // 変奏復習の忘却曲線: 翌日 → 3日 → 1週間 で卒業
+const SPEECH_RATE = {1:280, 2:300, 3:300, 4:320, 5:340};   // 字/分（親が読むときの目安）
 const TYPE_JA = {T1:"直接記憶", T2:"数", T3:"季節", T4:"順序", T5:"心情",
                  T6:"合致絵", T7:"非登場", T8:"発言者", T9:"二重順序", T10:"状態変化"};
 const K_COLOR = {aka:"var(--k-aka)", ao:"var(--k-ao)", midori:"var(--k-midori)", kuro:"var(--k-kuro)", kiiro:"var(--k-kiiro)"};
@@ -372,7 +397,8 @@ const MARU_PATH = "M50 6 C18 4 5 34 8 58 C11 88 44 99 70 94 C96 89 98 54 88 33 C
 const STAMP_RANK = ["🌸","🎏","🎐","⭐","🍡","🏮","🎋","🪁"];
 
 let MANIFEST = [], ALIAS = {}, LABELS = {};
-let cfg = Object.assign({group:"C", level:1, yasashii:true}, JSON.parse(localStorage.getItem(CFG_KEY) || "{}"));
+let cfg = Object.assign({group:"C", level:1, yasashii:true, noise:false, parentRead:false},
+                        JSON.parse(localStorage.getItem(CFG_KEY) || "{}"));
 const audio = new Audio();
 let session = null;
 
@@ -393,11 +419,93 @@ Promise.all([
 ]).then(([m,a,l])=>{ MANIFEST=m.items||[]; ALIAS=a||{}; LABELS=l||{}; refreshToday(); });
 
 function unitsFor(g,l){ return MANIFEST.filter(it=>it.group===g && it.level===l); }
-function refreshToday(){ document.getElementById("todayTag").textContent = `きょうは ${GROUP_SHORT[cfg.group]||cfg.group}グループ・レベル${cfg.level}`; }
+function refreshToday(){
+  document.getElementById("todayTag").textContent = `きょうは ${GROUP_SHORT[cfg.group]||cfg.group}グループ・レベル${cfg.level}`;
+  refreshReviewBadge();
+}
+
+// ---------- まちがい直し（変奏復習・忘却曲線） ----------
+function loadReview(){ try{ return JSON.parse(localStorage.getItem(REVIEW_KEY)||"{}"); }catch(e){ return {}; } }
+function saveReview(r){ localStorage.setItem(REVIEW_KEY, JSON.stringify(r)); }
+function dayKey(d){ return d.toLocaleDateString("sv"); }
+function addDays(n){ const d=new Date(); d.setDate(d.getDate()+n); return dayKey(d); }
+
+// 誤答は翌日に再出題。正解するたび間隔を延ばし、1週間を通過したら卒業（キューから消える）。
+function scheduleReview(unitId, qId, correct){
+  const r=loadReview(), key=unitId+"|"+qId, cur=r[key];
+  if(correct){
+    if(!cur) return;                                   // もともと正解の問題は積まない
+    const st=(cur.stage||0)+1;
+    if(st>=REVIEW_STEPS.length) delete r[key];         // 卒業
+    else r[key]={u:unitId, q:qId, stage:st, due:addDays(REVIEW_STEPS[st])};
+  } else {
+    r[key]={u:unitId, q:qId, stage:0, due:addDays(REVIEW_STEPS[0])};
+  }
+  saveReview(r);
+}
+function dueReviewItems(){
+  const today=dayKey(new Date());
+  return Object.values(loadReview()).filter(x=>x && x.due && x.due<=today);
+}
+function refreshReviewBadge(){
+  const btn=document.getElementById("reviewBtn"), n=dueReviewItems().length;
+  if(!btn) return;
+  document.getElementById("reviewN").textContent=n;
+  btn.classList.toggle("none", n===0);
+}
+function startReview(){
+  const due=dueReviewItems();
+  const byUnit={};
+  due.forEach(x=>{ (byUnit[x.u]=byUnit[x.u]||[]).push(x.q); });
+  const queue=[];
+  Object.keys(byUnit).forEach(uid=>{
+    const src=MANIFEST.find(it=>it.unit_id===uid); if(!src) return;
+    const qs=src.questions.filter(q=>byUnit[uid].indexOf(q.q_id)>=0);
+    if(qs.length) queue.push(Object.assign({}, src, {questions:qs}));   // 該当設問だけの複製ユニット
+  });
+  if(!queue.length){ toast("きょうは まちがいなおしは ありません"); return; }
+  session={ mode:"review", strict:false, queue, ui:0, unit:queue[0], qi:0, answers:[], results:[] };
+  show("play"); audioUnlock().then(()=>runInstruction());
+}
+
+// ---------- 会場ノイズ（音源ファイル不要・WebAudioで合成） ----------
+let noiseCtx=null, noiseNodes=null;
+function startNoise(){
+  if(!cfg.noise) return;
+  try{
+    noiseCtx = noiseCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if(noiseCtx.state==="suspended") noiseCtx.resume();
+    const ctx=noiseCtx;
+    const buf=ctx.createBuffer(1, ctx.sampleRate*2, ctx.sampleRate), d=buf.getChannelData(0);
+    for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*0.5;
+    const src=ctx.createBufferSource(); src.buffer=buf; src.loop=true;
+    const lp=ctx.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=900;
+    const g=ctx.createGain(); g.gain.value=0.012;        // ごく薄く（本文の聞き取りを邪魔しない）
+    src.connect(lp); lp.connect(g); g.connect(ctx.destination); src.start();
+    noiseNodes={src, g, timer:null};
+    const tick=()=>{                                     // 鉛筆・椅子のような小さな物音をときどき
+      if(!noiseNodes) return;
+      const o=ctx.createOscillator(), og=ctx.createGain(), t=ctx.currentTime;
+      o.type="triangle"; o.frequency.value=180+Math.random()*220;
+      og.gain.setValueAtTime(0.0001,t);
+      og.gain.exponentialRampToValueAtTime(0.02, t+0.01);
+      og.gain.exponentialRampToValueAtTime(0.0001, t+0.12);
+      o.connect(og); og.connect(ctx.destination); o.start(t); o.stop(t+0.14);
+      noiseNodes.timer=setTimeout(tick, 2500+Math.random()*4000);
+    };
+    noiseNodes.timer=setTimeout(tick, 2000+Math.random()*3000);
+  }catch(e){ /* 非対応環境ではノイズなしで進む */ }
+}
+function stopNoise(){
+  if(!noiseNodes) return;
+  try{ clearTimeout(noiseNodes.timer); noiseNodes.src.stop(); }catch(e){}
+  noiseNodes=null;
+}
 
 // ---------- ホーム配線 ----------
 document.getElementById("startBtn").addEventListener("click", startSingle);
 document.getElementById("moshiBtn").addEventListener("click", startMoshi);
+document.getElementById("reviewBtn").addEventListener("click", startReview);
 document.getElementById("calBtn").addEventListener("click", ()=>{ renderGanbari(); show("calendar"); });
 document.getElementById("calBack").addEventListener("click", ()=>show("home"));
 
@@ -440,9 +548,31 @@ function runInstruction(){
      </div>`;
   setTimeout(runStory, 1500);
 }
-// STEP2: 本文
+// STEP2: 本文（おうちのかたが読む／音声で聞く）
 function runStory(){
   const unit=session.unit, nsc=unit.story_scenes.length;
+
+  if(cfg.parentRead){   // 親が読むモード: 音声を使わず原稿＋読み上げペースを表示
+    const secs=Math.max(1, Math.round(unit.expected_duration_sec||0));
+    document.getElementById("stage").innerHTML =
+      `<div class="read-pane">
+         <div class="read-head">おうちのかたが よんで あげてください
+           <span class="read-meta">めやす ${secs}びょう ・ ${SPEECH_RATE[unit.level]||300}字/分（バーに合わせて読む）</span></div>
+         <div class="read-body">${unit.story_scenes.map(s=>`<div class="read-scene">${esc(s.text)}</div>`).join("")}</div>
+         <div class="pace"><i id="paceBar"></i></div>
+         <button class="mini-btn go" id="readDone">よみおわった → もんだいへ</button>
+       </div>`;
+    const bar=document.getElementById("paceBar"), t0=performance.now();
+    (function pace(now){
+      if(!document.body.contains(bar)) return;
+      const p=Math.min(1,(now-t0)/(secs*1000));
+      bar.style.width=(p*100).toFixed(1)+"%";
+      if(p<1) requestAnimationFrame(pace);
+    })(t0);
+    document.getElementById("readDone").onclick=()=>runQuestion();
+    return;
+  }
+
   document.getElementById("stage").innerHTML =
     `<div class="stage-center">
        <div class="breath">${maruSVG()}<div class="ear">👂</div></div>
@@ -450,7 +580,9 @@ function runStory(){
        <div class="scene-dots">${Array.from({length:nsc},()=>'<i></i>').join("")}</div>
        <div class="oto">えは でません ・ おとだけ</div>
      </div>`;
+  startNoise();
   playAudio(CONTENT + unit.story_audio).then(()=>{
+    stopNoise();
     if(easy()){
       document.getElementById("stage").innerHTML =
         `<div class="stage-center">
@@ -520,6 +652,7 @@ function grade(q, picked){
   const pa=[...picked].sort();
   const ok = pa.length===correctIdx.length && pa.every(i=>correctIdx.includes(i));
   session.answers.push({q_id:q.q_id, type:q.type, correct:ok});
+  scheduleReview(session.unit.unit_id, q.q_id, ok);   // 誤答は翌日へ／正解なら間隔を延ばす
   document.getElementById("confirmBtn").disabled=true;
   const rb=document.getElementById("replayBtn"); if(rb) rb.disabled=true;
   stage.querySelectorAll(".cell").forEach((btn,i)=>{
@@ -534,16 +667,18 @@ function grade(q, picked){
 }
 // STEP5: 1話の完了 → 記録して次へ / けっか
 function completeUnit(){
+  stopNoise();
+  refreshReviewBadge();
   const ans=session.answers, n=ans.length, ok=ans.filter(a=>a.correct).length, perfect=ok===n;
   recordDay(perfect, ok, n);
   recordHistory(session.unit.group, session.unit.level, ans);
-  if(session.mode==="moshi"){
+  if(session.mode==="moshi" || session.mode==="review"){
     session.results.push({theme:session.unit.theme, ok, n});
     session.ui++;
     if(session.ui < session.queue.length){
       session.unit=session.queue[session.ui]; session.qi=0; session.answers=[];
       runInstruction();
-    } else showMoshiResult();
+    } else showMultiResult();
   } else showSingleResult(ok, n);
 }
 function showSingleResult(ok, n){
@@ -563,17 +698,28 @@ function showSingleResult(ok, n){
   const el=document.getElementById("resScoreN"); let c=0; clearInterval(el._t);
   el._t=setInterval(()=>{ c++; el.textContent=c; if(c>=ok||ok===0){ el.textContent=ok; clearInterval(el._t);} }, 170);
 }
-function showMoshiResult(){
+function showMultiResult(){
+  const isReview = session.mode==="review";
   const R=session.results, tot=R.reduce((p,s)=>p+s.n,0), gok=R.reduce((p,s)=>p+s.ok,0), perfect=gok===tot;
   document.getElementById("confirmWrap").style.display="none";
-  document.getElementById("resHeadLabel").textContent="もぎ けっか";
+  document.getElementById("resHeadLabel").textContent = isReview ? "まちがいなおし" : "もぎ けっか";
   document.getElementById("resNo").textContent=`${R.length}話`;
-  document.getElementById("resFace").textContent = perfect?"🏆":(gok>=Math.ceil(tot*0.6)?"😊":"🌱");
+  document.getElementById("resFace").textContent =
+    perfect ? (isReview?"🌸":"🏆") : (gok>=Math.ceil(tot*0.6)?"😊":"🌱");
   document.getElementById("resScore").innerHTML=`ぜんぶで <b>${gok}</b> / ${tot}もん`;
   const rm=document.getElementById("resMarks"); rm.style.flexDirection="column";
   rm.innerHTML = R.map((s,i)=>`<div class="moshi-row">${i+1}. ${esc(s.theme)}<b>${s.ok}/${s.n}</b></div>`).join("");
-  document.getElementById("resStamp").style.display="none";
-  const again=document.getElementById("resAgain"); again.textContent="もう1かい もぎ"; again.onclick=startMoshi;
+  const rs=document.getElementById("resStamp");
+  if(isReview){
+    const left=dueReviewItems().length;
+    rs.style.display="flex";
+    rs.innerHTML=`<div class="slot new">${left?"🔁":"🌸"}</div>
+      <div class="cap">${left? `のこり <b style="color:var(--shu)">${left}もん</b> あるよ`
+                             : "きょうの まちがいなおしは <b style=\"color:var(--shu)\">ぜんぶ おわり！</b>"}</div>`;
+  } else rs.style.display="none";
+  const again=document.getElementById("resAgain");
+  again.textContent = isReview ? "つづける" : "もう1かい もぎ";
+  again.onclick = isReview ? startReview : startMoshi;
   show("result");
 }
 document.getElementById("resHome").onclick=()=>{ refreshToday(); show("home"); };
@@ -701,6 +847,9 @@ function openSettings(){
   go.querySelectorAll(".opt").forEach(b=>b.onclick=()=>{ cfg.group=b.dataset.g; saveCfg(); go.querySelectorAll(".opt").forEach(x=>x.classList.remove("sel")); b.classList.add("sel"); updateStock(); });
   lo.querySelectorAll(".opt").forEach(b=>b.onclick=()=>{ cfg.level=+b.dataset.l; saveCfg(); lo.querySelectorAll(".opt").forEach(x=>x.classList.remove("sel")); b.classList.add("sel"); updateStock(); });
   document.getElementById("yasashiiChk").onchange=(e)=>{ cfg.yasashii=e.target.checked; saveCfg(); };
+  const nc=document.getElementById("noiseChk"), pc=document.getElementById("parentReadChk");
+  nc.checked=!!cfg.noise;  nc.onchange=(e)=>{ cfg.noise=e.target.checked; saveCfg(); };
+  pc.checked=!!cfg.parentRead; pc.onchange=(e)=>{ cfg.parentRead=e.target.checked; saveCfg(); };
   updateStock(); show("settings");
 }
 function updateStock(){ document.getElementById("stockInfo").textContent=`いま この設定で ${unitsFor(cfg.group,cfg.level).length}話 あります`; }
