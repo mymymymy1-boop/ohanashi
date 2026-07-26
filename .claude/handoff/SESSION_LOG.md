@@ -169,3 +169,36 @@
 1. **VPS本番へコンテンツ転送**（tar-over-ssh）。これをやるまで子どもの端末は224話のまま。
 2. 残7話の扱い（作り直す / medium・lowの4話は許容 / 捨てる）。
 3. 耳チェック10話（泰介さんのみ判定可）。
+
+---
+
+## 2026-07-26 21:20-21:45 — 修復2段目を VPS 本番へ反映（完了）
+
+### 泰介さんの判断（このセッションの合意）
+- 「今すぐ転送する」→ 本番反映を実施。
+- 「245話で十分＝7話は捨てる」→ **残7話は3段目の修復をせず欠番で確定**。解除基準「指摘ゼロのみ」は緩めない。
+
+### 実施した手順（再現可能な形で）
+1. 転送対象の確定: `cd content/pilot && find . -newermt "2026-07-26 00:00" -type f ! -path "./images/*" ! -name "*.log" ! -name "*.jsonl"` → **370ファイル**。
+   - 28話の `lv{n}_text.json` / `lv{n}_questions.json` / `lv{n}_tts_script.json` / `lv{n}_audio/*.mp3` ＋ `review_manifest.json` ＋ `defect_units.json`（＋pre_repair2退避・cost.json・レポート類）
+   - ユニットIDの正本は `content/pilot/defect_units.json.bak_20260726`（修復前の28話）
+2. VPS側で退避: `defect_units.json` / `review_manifest.json` → `*.vpsbak_20260726`
+3. 転送: `tar -czf pilot_update.tgz -T list`（31MB）→ `cat pilot_update.tgz | ssh ... 'tar -xzf - -C /opt/apps/ohanashi/content/pilot'`（rsyncはローカルに無いので tar-over-ssh）
+4. コードも ff 更新: `git merge --ff-only origin/master`（`f0a73eb → a2229ac`・repair_story.py＋記録のみ）。**pm2 restart はしない**（データは毎リクエスト読込＝無停止で反映）
+
+### 検証（すべて実測・PASS）
+- 転送370ファイルの **md5 が全件ローカルと一致**（`xargs md5sum` をローカル/リモートで取って diff）
+- 本番の28話で **mp3 が本文JSONより新しい**ことを確認 → 古い音声の残留 0
+- 公開URL経由で配信されるファイルの md5 がローカルと一致（text/questions/story.mp3 を3話ぶん＝9本）
+- `https://ohanashi.bizsp.net/pro/content/defect_units.json` → units **7**、`review_manifest.json` → items **252**
+- **実ブラウザ（Playwright + 実Chrome）で本番URL**（`scratchpad/verify_pool.py`）: MANIFEST **245** / DEFECTS **7** / 全グループ×全Lvの和集合 **245** / 欠陥ユニット混入 **0** / 解除話3本が出題対象に存在 / 解除話 `sk_20260724_0060_lv5` を実再生（blob・readyState 4・59.5秒・再生位置が進む）／親設定の在庫表示「検品で見直し中の 7話 は出題から外しています」
+- 前セッションの音声回帰テスト `test_audio_play.py` も本番URLで **ok:true**（もんだいへ→読み上げ **57ms**・先読み4本・進行バー・404復帰・おとのテスト・キャッシュ mp3 6/img 4）
+
+### 学び
+- `MANIFEST` は読み込み時点で欠陥を除外済み（`play/index.html:482`）なので **`MANIFEST.length` は252ではなく245**。検証の期待値をそこで一度間違えた（アプリは正しかった）。
+- 転送対象を「手でIDを並べる」より **mtime基準の find で拾って md5 全件照合**する方が漏れに強い。
+
+### 未解決（次回の最初）
+1. 耳チェック10話（`content/pilot/audio_check_list.json`・泰介さんのみ判定可）。
+2. 泰介検品（`/pro/review`・各グループ5問サンプル）→ NG系統修正。
+3. 進行バーの見た目の感想（実機で目視されていない唯一の項目）。

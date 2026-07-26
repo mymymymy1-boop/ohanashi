@@ -1,17 +1,25 @@
 # HANDOFF — ohanashi（お話の記憶アプリ + PRO）
 
-## 0-A. 最新状態（2026-07-26 夜・修復2段目 完了／**本番未反映**・コミット `8b8d83e`）
+## 0-A. 最新状態（2026-07-26 夜・修復2段目 **本番反映まで完了**・コミット `a2229ac`）
 
-**隔離中だった28話すべてを本文から作り直し、21話を隔離解除。ローカルは出題可能 245話/252。ただし VPS 本番はまだ 224話のまま＝コンテンツ転送が未実施。**
+**隔離中だった28話すべてを本文から作り直し、21話を隔離解除 → VPS本番に反映済み。本番の出題可能は 224 → 245話（除外7話）。泰介さん判断で残7話は修復せず欠番のまま確定。**
 
-### 次にやること（再開したら最初にこれ）
-1. **VPS本番へ反映**（これをやるまで子どもの端末には反映されない）
-   - 変更されたのは**コンテンツのみ**（`content/pilot/` 配下・git管理外）。コードは push 済み（`8b8d83e`）
-   - 対象: 28話ぶんの `lv{n}_text.json` / `lv{n}_questions.json` / `lv{n}_audio/*.mp3` / `lv{n}_tts_script.json` ＋ `review_manifest.json` ＋ `defect_units.json`
-   - 転送は **tar-over-ssh**（rsyncはローカルに無い）→ 手順は [[vps-python-app-deploy]] / メモリ `ohanashi-deployment`
-   - 反映後 `pm2 restart ohanashi` は不要（データはリクエスト毎に読む）。ブラウザで「除外7話・出題可能245話」を実測確認する
-2. 残7話の扱いを決める（下記）
-3. 耳チェック10話（`content/pilot/audio_check_list.json`・泰介さんのみ判定可）
+### 本番反映の実績（2026-07-26 21:30）
+- 転送: **tar-over-ssh**（`tar -czf - -T list | ssh ... tar -xzf - -C /opt/apps/ohanashi/content/pilot`）で **370ファイル 31MB**。対象は `find content/pilot -newermt "2026-07-26 00:00" -type f`（images/・*.log・*.jsonl を除外）＝28話ぶんの text/questions/tts_script/audio + `review_manifest.json` + `defect_units.json`
+- 反映前に VPS 側の `defect_units.json` / `review_manifest.json` を `*.vpsbak_20260726` に退避（ロールバック用）
+- コードも `f0a73eb → a2229ac` に ff 更新（`repair_story.py`＋記録のみ・アプリ挙動に変更なし）。`pm2 restart` はしていない（データは毎リクエスト読込・無停止）
+- **検証（実測）**: ①転送370ファイル全部の md5 がローカルと一致 ②本番の28話すべてで「mp3 が本文JSONより新しい」＝古い音声の残留0 ③公開URLで配信されるファイルの md5 がローカルと一致（抜き取り9本） ④**実ブラウザ（Playwright＋実Chrome）で本番URL**: MANIFEST 245 / DEFECTS 7 / 全グループ全レベルの和集合 245 / 欠陥ユニットの混入 0 / 解除された話が実際に出題対象に入っている / 解除話 `sk_20260724_0060_lv5` を再生して blob・readyState 4・59.5秒・再生位置が進む ⑤前回の音声通し回帰テスト（`test_audio_play.py`）も本番URLで全PASS（もんだいへ→読み上げ **57ms**・先読み4本・進行バー・404復帰）
+- 検証スクリプト: `scratchpad/verify_pool.py`（第1引数にURL）
+
+### 残7話は「欠番で確定」（2026-07-26・泰介さん判断）
+- high 3件: `sk_20260724_0031_lv3` / `sk_20260724_0034_lv5` / `sk_20260724_0051_lv5`
+- medium/low のみ 4件: `sk_20260721_0007_lv4` / `sk_20260721_0010_lv5` / `sk_20260724_0047_lv4` / `sk_20260724_0058_lv5`
+- **3段目の修復はしない**。245話で十分（252話中2.8%が欠番）。解除基準「検品の指摘ゼロのみ」は緩めない。データは残してあるので将来やり直したければ `pipeline/repair_story.py` で再挑戦できる
+
+### 次にやること
+1. 耳チェック10話（`content/pilot/audio_check_list.json`・泰介さんのみ判定可）
+2. 泰介検品（各グループ5問サンプル・`/pro/review`）→ NG系統修正
+3. 進行バーの見た目の感想（実機で目視されていない唯一の項目）
 
 ### やったこと
 - **新ツール `pipeline/repair_story.py`**（修復2段目）。骨格から本文を作り直し→設問再生成→機械QC→合格分のみ書込み→**TTS原稿キャッシュを破棄**→`--audio` で音声も作り直し
