@@ -118,3 +118,27 @@
 - MyBrain: `02_Projects/ohanashi-app.md` に「2026-07-25（夜・検品と修復まで完了）」を先頭追加、`03_Knowledge/llm-content-inspection.md` を新規作成（LLM検品の型・偽陽性3割・仕様意図の較正・段階修復・TTS既定の課金事故）。
 - リポジトリ: HANDOFF.md に検品/修復セクション、本SESSION_LOG追記。
 - auto-memory: `ohanashi-pro-p1.md` に検品・隔離・修復を追記。
+
+## 2026-07-26 iPhoneで音が出ない／読み込みが遅い を根治し本番反映（`f0a73eb`）
+
+### 経緯・合意
+- 「つづきをやるから直前の作業おもいだして」→ HANDOFF/SESSION_LOG/auto-memory を読んで復元 → 次の選択肢を提示。
+- 泰介さん選択：**「いまiPhoneで再生したら音がでなかった改善策を洗い出して」**。症状は**「画面は進むが音だけ出ない」**。実装範囲は**「1〜6全部＋フォールバック」**を選択。
+- 途中で追加要望：**「もんだいをとくボタンを押してから読み上げまで時間がかかりフリーズして見える。進行バーを作って。もっと早く問題を読み込んで」**（スクリーンショット提示）。
+- 「推奨で」→ コミット → **VPS本番反映**まで実施（本番操作は都度提示のうえ実行）。
+
+### 実行と結果
+- **音が出ない**（`play/index.html`）: ①解錠用base64が壊れていた→**無音WAV**に差し替え（旧アプリのMP3もChromeでは`NotSupportedError`）②`audioUnlock()`が永久未解決になり得た→**700msで必ず前進**③**fetch→blob再生**に変更（Range/206とCache Storageの噛み合わせ問題を回避）④`canplaythrough`待ち廃止・`playsinline`・`audioSession=playback`⑤失敗時は**復帰画面＋診断表示**、⑥親ゾーンに**🔊 おとの テスト**。
+- **SW相互干渉**（`play/sw.js` v2 / `static/sw.js` v4）: 旧アプリのSWが`/api/`以外の全GET（＝PROの音声）を握っていた→`/pro/`素通し。両者ともRange要求は不介入、キャッシュ削除は自分の版のみ（互いに消し合っていた）。
+- **遅い→先読み＋進行バー**: お話開始時に本文＋全設問（模試/復習は次話本文も）を先読み。**「もんだいへ」→読み上げ 59ms（本番実測）**。未取得時のみ最上部に受信バイト基準のバー。二重取得防止・blob上限24。
+- **本番反映**: push → VPSで`git merge --ff-only origin/master` → `pm2 restart ohanashi` → `pm2 save`（online / unstable restarts 0）。**本番URLに対して**Playwright通し検証を実行し全PASS。
+
+### ハマったこと（再発防止）
+- **Playwright `page.evaluate` は返り値のPromiseを待つ**。タップ待ちのPromiseを返したため相互デッドロックし、「アプリが固まった」と2回誤診した。`()=>{ ...; }`で捨てる。
+- **Claude-in-Chrome のタブがmp3を一切デコードできない状態**だった（blobでも`readyState 0`、一度レンダラーが45秒フリーズ）。別プロセスのChrome/Chromiumでは正常。**ブラウザ側の故障をアプリの不具合と誤診しない**。
+- 検証は最終的に **Playwright + 実Chrome（`channel="chrome"`）** に統一。テスト正本 = scratchpadの `test_audio_play.py`（第1引数にURL、ローカル/本番どちらにも当てられる）。
+
+### 未解決（次回）
+1. **泰介さんのiPhone実機での効果確認**（PWAは完全終了→開き直し）。だめなら「おとの テスト」の診断行を回収。
+2. 進行バーの見た目は未目視（動作のみ確認）。
+3. 残28話の本文修復・耳チェック10話は着手していない。
