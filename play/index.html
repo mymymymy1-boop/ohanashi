@@ -260,6 +260,25 @@
   .toast{ position:fixed; left:50%; bottom:40px; transform:translateX(-50%); background:var(--navy); color:#fff; padding:13px 22px; border-radius:14px; font-size:16px; font-family:var(--maru); font-weight:700; opacity:0; transition:.3s; z-index:30; pointer-events:none; }
   .toast.show{ opacity:1; }
 
+  /* 音声よみこみ中の進行バー（固まって見えないように） */
+  .loading{ position:fixed; left:0; top:0; right:0; display:none; align-items:center; gap:12px;
+            padding:11px 16px calc(11px + env(safe-area-inset-top,0px)); background:#FBF6E9F2;
+            border-bottom:1px solid #00000012; z-index:35; font-family:var(--maru); font-size:13px;
+            font-weight:700; color:var(--navy); }
+  .loading.show{ display:flex; }
+  .loading .lbar{ flex:1; height:9px; border-radius:99px; background:#0000001a; overflow:hidden; }
+  .loading .lbar i{ display:block; height:100%; width:0; border-radius:99px; background:var(--shu); }
+
+  /* 音が出なかったときの復帰（iOSの自動再生ロック・消音スイッチ・SWキャッシュ対策） */
+  .audiofix{ position:fixed; inset:0; background:#0b1b3aee; display:none; place-items:center; z-index:40; padding:24px; }
+  .audiofix.show{ display:grid; }
+  .af-card{ text-align:center; color:#fff; font-family:var(--maru); max-width:420px; width:100%; }
+  .af-title{ font-size:22px; font-weight:800; margin-bottom:6px; }
+  .af-sub{ font-size:15px; color:#ffffffaa; margin-bottom:22px; }
+  .af-go{ display:block; width:100%; background:var(--shu); color:#fff; border:none; border-radius:18px; padding:20px; font-family:var(--maru); font-size:22px; font-weight:800; cursor:pointer; }
+  .af-skip{ margin-top:14px; background:transparent; border:1.5px solid #ffffff55; color:#fff; font-family:var(--maru); font-size:15px; font-weight:700; border-radius:14px; padding:11px 20px; cursor:pointer; }
+  .af-note{ margin-top:16px; font-size:11px; color:#ffffff66; letter-spacing:.04em; }
+
   @media (prefers-reduced-motion:reduce){
     *{ animation:none!important; transition:none!important; }
     .maru-draw path{ stroke-dashoffset:0!important; }
@@ -356,6 +375,8 @@
       <label class="switch-row" style="margin-top:12px"><input type="checkbox" id="parentReadChk"> おうちのかたが読む（音声を使わず原稿とペースを表示）</label>
     </div>
     <div class="field stock" id="stockInfo"></div>
+    <button class="to-report" id="soundTest">🔊 おとの テスト（音が出ないとき）</button>
+    <div class="field stock" id="soundNote" style="display:none"></div>
     <button class="to-report" id="toReport">📊 せいせきを みる</button>
     <button class="set-back" id="setBack">← もどる</button>
   </div>
@@ -427,8 +448,17 @@ let MANIFEST = [], ALIAS = {}, LABELS = {}, DEFECTS = [];   // DEFECTS=検品で
 let cfg = Object.assign({group:"C", level:1, yasashii:true, noise:false, parentRead:false,
                          schools:[], levelMode:"manual"},
                         JSON.parse(localStorage.getItem(CFG_KEY) || "{}"));
-const audio = new Audio();
+function newPlayer(){
+  const a=new Audio();
+  a.setAttribute("playsinline","");           // iOS: 全画面プレイヤーに奪われない
+  a.preload="auto";
+  return a;
+}
+let audio = newPlayer();
+try{ if(navigator.audioSession) navigator.audioSession.type = "playback"; }catch(e){}
+                                             // iOS16.4+: マナースイッチ(消音)で音声が消えるのを防ぐ
 let session = null;
+let audioReady = false, playSeq = 0, lastAudioErr = "";
 
 function saveCfg(){ localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
 function esc(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
@@ -542,6 +572,7 @@ function startReview(){
   });
   if(!queue.length){ toast("きょうは まちがいなおしは ありません"); return; }
   session={ mode:"review", strict:false, queue, ui:0, unit:queue[0], qi:0, answers:[], results:[] };
+  prefetchUnit(session.unit);   // 設問の音声もここで先読みしておく（もんだいへ進んだ瞬間に鳴らす）
   show("play"); audioUnlock().then(()=>runInstruction());
 }
 
@@ -591,6 +622,7 @@ function startSingle(){
   const pool = poolNow();
   if(!pool.length){ toast("この レベルの おはなしが まだ ありません"); return; }
   session = { mode:"single", strict:false, unit: pool[Math.floor(Math.random()*pool.length)], qi:0, answers:[] };
+  prefetchUnit(session.unit);   // 設問の音声もここで先読みしておく（もんだいへ進んだ瞬間に鳴らす）
   show("play"); audioUnlock().then(()=>runInstruction());
 }
 function startMoshi(){
@@ -599,18 +631,186 @@ function startMoshi(){
   for(let i=pool.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [pool[i],pool[j]]=[pool[j],pool[i]]; }
   const queue = pool.slice(0, Math.min(MOSHI_N, pool.length));
   session = { mode:"moshi", strict:true, queue, ui:0, unit:queue[0], qi:0, answers:[], results:[] };
+  prefetchUnit(session.unit);   // 設問の音声もここで先読みしておく（もんだいへ進んだ瞬間に鳴らす）
   show("play"); audioUnlock().then(()=>runInstruction());
 }
+// ---------- 音声（iOS対策はここに集約。旧アプリ static/index.html の実績実装に合わせてある） ----------
+// 解錠用の無音音声。壊れた/デコードできないdata URIだとタップの解錠が無駄になるので、
+// どのブラウザでも確実に鳴る 8kHz 8bit モノラルの無音WAV(25ms)を使う。
+const SILENT_WAV = "data:audio/wav;base64,UklGRuwAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YcgAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==";
+function resetAudioEvents(){ audio.onended=null; audio.onerror=null; audio.oncanplay=null; audio.onloadeddata=null; }
 function audioUnlock(){
-  try{ audio.src="data:audio/mpeg;base64,//uQx"; return audio.play().then(()=>audio.pause()).catch(()=>{}); }
-  catch(e){ return Promise.resolve(); }
-}
-function playAudio(src){
   return new Promise((resolve)=>{
-    let done=false; const fin=()=>{ if(done)return; done=true; audio.removeEventListener("ended",fin); audio.removeEventListener("error",fin); resolve(); };
-    audio.addEventListener("ended",fin); audio.addEventListener("error",fin);
-    audio.src=src; const p=audio.play(); if(p&&p.catch) p.catch(()=>{});
+    let settled=false;
+    const done=()=>{ if(settled)return; settled=true; audio.muted=false; resolve(); };
+    setTimeout(done, 700);        // 解錠の返事を待って固まらない（無音MP3のpromiseは環境により永久に未解決）
+    try{
+      resetAudioEvents();
+      audio.muted=true; audio.src=SILENT_WAV;
+      const p=audio.play();
+      if(p&&p.then) p.then(()=>{ audioReady=true; try{audio.pause();}catch(e){} done(); })
+                     .catch(e=>{ lastAudioErr=(e&&e.name)||"unlock"; done(); });
+      else { audioReady=true; done(); }
+    }catch(e){ lastAudioErr="unlock-ex"; done(); }
   });
+}
+// mp3は「自分で取ってきて blob として鳴らす」。メディア要素にURLを直接渡すと
+// Rangeリクエストになり、Service Worker のキャッシュ(200全文)と噛み合わずiOSで無音になる。
+// blobなら端末内で即再生できるのでSWの有無に左右されない（旧アプリの実績実装と同じ）。
+const blobCache = new Map();     // src -> objectURL（取得ずみ）
+const inflight  = new Map();     // src -> Promise（二重取得しない）
+const dlProgress= new Map();     // src -> 0..1（進行バー用）
+async function fetchAudioBlob(src){
+  const res = await fetch(src);
+  if(!res.ok) throw new Error("HTTP "+res.status);
+  const total = +(res.headers.get("content-length") || 0);
+  let b;
+  if(res.body && res.body.getReader && total){        // 進捗が取れる経路
+    const rd=res.body.getReader(), chunks=[]; let got=0;
+    for(;;){ const r=await rd.read(); if(r.done) break;
+      chunks.push(r.value); got+=r.value.length; dlProgress.set(src, Math.min(1, got/total)); }
+    b=new Blob(chunks, {type: res.headers.get("content-type")||"audio/mpeg"});
+  } else { b=await res.blob(); }
+  dlProgress.set(src, 1);
+  if(!b || b.size < 500) throw new Error("empty "+(b?b.size:0));   // 空応答を焼き付けて永久無音になるのを防ぐ
+  return URL.createObjectURL(b);
+}
+function audioURL(src){
+  if(blobCache.has(src)) return Promise.resolve(blobCache.get(src));
+  if(inflight.has(src)) return inflight.get(src);
+  const p = fetchAudioBlob(src).then(u=>{
+    inflight.delete(src); blobCache.set(src, u); trimBlobs(); return u;
+  }).catch(e=>{ inflight.delete(src); dlProgress.delete(src); throw e; });
+  inflight.set(src, p);
+  return p;
+}
+function trimBlobs(){                                  // 端末メモリ対策（再生中のものは消さない）
+  while(blobCache.size > 24){
+    let killed=false;
+    for(const k of blobCache.keys()){
+      if(blobCache.get(k)===audio.src) continue;
+      try{ URL.revokeObjectURL(blobCache.get(k)); }catch(e){}
+      blobCache.delete(k); dlProgress.delete(k); killed=true; break;
+    }
+    if(!killed) break;
+  }
+}
+// お話に入った時点で、本文と全設問の音声を裏で取っておく（設問に進んだ瞬間に鳴らせるように）
+function prefetchUnit(unit){
+  if(!unit) return;
+  const list=[];
+  if(unit.story_audio) list.push(CONTENT+unit.story_audio);
+  (unit.questions||[]).forEach(q=>{ if(q.audio) list.push(CONTENT+q.audio); });
+  const nx = session && session.queue && session.queue[(session.ui||0)+1];
+  if(nx && nx.story_audio) list.push(CONTENT+nx.story_audio);   // 模試・復習では次のお話の本文も
+  list.reduce((p,u)=>p.then(()=>audioURL(u).catch(()=>{})), Promise.resolve());
+}
+// よみこみ中は進行バーを出す（止まって見えるのを防ぐ）。取得ずみなら何もしない。
+function ensureLoading(){
+  let el=document.getElementById("loadingBar");
+  if(!el){
+    el=document.createElement("div"); el.id="loadingBar"; el.className="loading";
+    el.innerHTML=`<span>おとを よみこんでいます…</span><span class="lbar"><i></i></span>`;
+    document.body.appendChild(el);
+  }
+  return el;
+}
+function loadingWatch(src){
+  if(blobCache.has(src)) return ()=>{};
+  const el=ensureLoading(), bar=el.querySelector("i");
+  el.classList.add("show"); bar.style.width="0%";
+  let raf=0; const t0=performance.now();
+  const tick=()=>{
+    const p=dlProgress.get(src);
+    // 進捗が取れない環境では時間ベースで9割まで伸ばす（バーが固まって見えないように）
+    const v=(typeof p==="number") ? p : Math.min(0.9, (performance.now()-t0)/4000);
+    bar.style.width=(v*100).toFixed(1)+"%";
+    raf=requestAnimationFrame(tick);
+  };
+  tick();
+  return ()=>{ cancelAnimationFrame(raf); bar.style.width="100%"; setTimeout(()=>el.classList.remove("show"), 180); };
+}
+// 再生する。失敗しても「無音のまま先へ進む」ことは絶対にしない
+// （1回だけ自動リトライ → だめならタップで鳴らす画面を出して待つ）。
+function playAudio(src){
+  const seq = ++playSeq;
+  return new Promise((resolve)=>{
+    const start=async (n)=>{
+      if(seq!==playSeq){ resolve(); return; }              // 新しい再生に置き換わった＝この再生は破棄
+      let done=false;
+      const fin =()=>{ if(done)return; done=true; resetAudioEvents(); resolve(); };
+      const fail=(why)=>{
+        if(done)return; done=true; lastAudioErr=why||"err"; resetAudioEvents();
+        audio=newPlayer();          // 壊れたソースを食った要素は以後まともに鳴らない。作り直して逃げる
+        if(n===0){ blobCache.delete(src); setTimeout(()=>start(1), 400); return; }  // 一過性なら1回だけ再挑戦
+        askTapToPlay(src, seq, resolve);
+      };
+      let url;
+      const stopBar=loadingWatch(src);
+      try{ url=await audioURL(src); stopBar(); }
+      catch(e){ stopBar(); fail("fetch:"+((e&&e.message)||"ng")); return; }   // 取れないものを要素に渡さない
+      if(seq!==playSeq){ resolve(); return; }
+      audio.onended=fin;
+      audio.onerror=()=>fail("load");
+      try{
+        audio.muted=false; audio.src=url; audio.load();
+        // canplaythrough を待つのは禁止（長い音声・iOSで不発になり永久固着＝無音）。
+        // canplay/loadeddata をタイムアウト付きで軽く待ち、来なくても再生に進む。
+        await Promise.race([
+          new Promise(r=>{ audio.oncanplay=r; audio.onloadeddata=r; }),
+          new Promise(r=>setTimeout(r,1200)),
+        ]);
+        audio.oncanplay=null; audio.onloadeddata=null;
+        if(done || seq!==playSeq) return;
+        const p=audio.play();
+        if(p&&p.catch) p.catch(e=>fail((e&&e.name)||"play"));
+      }catch(e){ fail("exception"); }
+    };
+    start(0);
+  });
+}
+function ensureAudioFix(){
+  let ov=document.getElementById("audioFix");
+  if(!ov){
+    ov=document.createElement("div"); ov.id="audioFix"; ov.className="audiofix";
+    ov.innerHTML=`<div class="af-card">
+        <div class="af-title">おとが でませんでした</div>
+        <div class="af-sub">したの ボタンを おしてね</div>
+        <button class="af-go" type="button">▶ おとを ならす</button>
+        <button class="af-skip" type="button">おとなしで すすむ</button>
+        <div class="af-note"></div>
+      </div>`;
+    document.body.appendChild(ov);
+  }
+  return ov;
+}
+function askTapToPlay(src, seq, resolve){
+  stopNoise();
+  const ov=ensureAudioFix(), sub=ov.querySelector(".af-sub"), note=ov.querySelector(".af-note");
+  sub.textContent="したの ボタンを おしてね";
+  note.textContent=`${lastAudioErr} / unlock:${audioReady?"ok":"ng"} / sw:${(navigator.serviceWorker&&navigator.serviceWorker.controller)?"on":"off"}`;
+  ov.classList.add("show");
+  const close=()=>ov.classList.remove("show");
+  audioURL(src).catch(()=>{});                            // 次のタップで即鳴らせるよう裏で取っておく
+  ov.querySelector(".af-go").onclick=()=>{                 // ユーザー操作の中で直接 play する（iOSはこれなら通る）
+    const url=blobCache.get(src);   // ここで await すると iOS はユーザー操作の資格を失う。同期で決める
+    if(!url){                       // まだ取れていない＝取り直し中。もう一度押してもらう
+      sub.textContent="よみこみちゅう… もういちど おしてね";
+      audioURL(src).catch(()=>{ sub.textContent="おとが よみこめません。おとなしで すすめます"; });
+      return;
+    }
+    resetAudioEvents();
+    audio.onended=()=>{ resetAudioEvents(); close(); if(seq===playSeq) resolve(); };
+    audio.onerror=()=>{ sub.textContent="もういちど おしてみてね"; note.textContent="load / "+note.textContent; };
+    try{
+      audio.muted=false; audio.src=url; audio.load();
+      const p=audio.play();
+      if(p&&p.then) p.then(()=>{ audioReady=true; close(); })
+                     .catch(e=>{ sub.textContent="もういちど おしてみてね"; note.textContent=((e&&e.name)||"play")+" / "+note.textContent; });
+      else close();
+    }catch(e){ sub.textContent="もういちど おしてみてね"; }
+  };
+  ov.querySelector(".af-skip").onclick=()=>{ resetAudioEvents(); close(); if(seq===playSeq) resolve(); };
 }
 
 // STEP1: 指示
@@ -755,6 +955,7 @@ function completeUnit(){
     session.ui++;
     if(session.ui < session.queue.length){
       session.unit=session.queue[session.ui]; session.qi=0; session.answers=[];
+      prefetchUnit(session.unit);
       runInstruction();
     } else showMultiResult();
   } else showSingleResult(ok, n);
@@ -968,7 +1169,29 @@ function openSettings(){
   const nc=document.getElementById("noiseChk"), pc=document.getElementById("parentReadChk");
   nc.checked=!!cfg.noise;  nc.onchange=(e)=>{ cfg.noise=e.target.checked; saveCfg(); };
   pc.checked=!!cfg.parentRead; pc.onchange=(e)=>{ cfg.parentRead=e.target.checked; saveCfg(); };
+  const st=document.getElementById("soundTest"); st.onclick=soundTest;
+  document.getElementById("soundNote").style.display="none";
   updateStock(); show("settings");
+}
+// 実機（とくにiPhone）で音が出ないときの切り分け。短い設問音声を1本鳴らして状態を出す。
+function soundDiag(){
+  return `unlock:${audioReady?"ok":"ng"}`
+       + ` / sw:${(navigator.serviceWorker&&navigator.serviceWorker.controller)?"on":"off"}`
+       + ` / session:${(navigator.audioSession&&navigator.audioSession.type)||"-"}`
+       + (lastAudioErr ? ` / ${lastAudioErr}` : "");
+}
+function soundTest(){
+  const note=document.getElementById("soundNote");
+  note.style.display="block"; note.textContent="ならしています…";
+  const u=MANIFEST.find(it=>it.questions && it.questions.length && it.questions[0].audio);
+  audioUnlock().then(()=>{
+    if(!u){ note.textContent="おんせいが みつかりません ・ "+soundDiag(); return; }
+    note.textContent="ならしています… ・ "+soundDiag();
+    playAudio(CONTENT+u.questions[0].audio).then(()=>{
+      note.innerHTML="ならしおわりました。きこえましたか？<br><span style='opacity:.7'>"+esc(soundDiag())+"</span>"
+        + "<br><span style='opacity:.7'>聞こえない場合は 本体の消音スイッチ・音量・低電力モードを確認してください</span>";
+    });
+  });
 }
 function updateStock(){
   const el=document.getElementById("stockInfo");
