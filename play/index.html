@@ -223,6 +223,14 @@
              color:#fff; font-family:var(--maru); font-size:17px; font-weight:700; cursor:pointer; margin-top:8px; }
   .to-report{ min-height:56px; padding:0 22px; border-radius:14px; border:2px solid var(--shu); background:#C9372C22;
               color:#fff; font-family:var(--maru); font-size:17px; font-weight:700; cursor:pointer; margin-bottom:10px; }
+  /* ---- オフライン保存（親ゾーン） ---- */
+  .dl-bar{ height:10px; border-radius:999px; background:#ffffff1f; overflow:hidden; margin-top:9px; }
+  .dl-bar i{ display:block; height:100%; width:0; background:var(--shu); transition:width .25s; }
+  .dl-sub{ margin-top:8px; font-size:13px; color:#9FB0C9; line-height:1.7; }
+  .dl-sub b{ color:#EAE6DA; }
+  .dl-row{ display:flex; gap:10px; margin-top:10px; }
+  .dl-row button{ flex:1; min-height:44px; border-radius:12px; border:1px solid #ffffff33; background:#ffffff12;
+                  color:#fff; font-family:var(--maru); font-size:14px; font-weight:700; cursor:pointer; }
 
   /* ---- 成績表（濃紺） ---- */
   #report{ background:var(--navy); color:#EAE6DA; }
@@ -375,6 +383,16 @@
       <label class="switch-row" style="margin-top:12px"><input type="checkbox" id="parentReadChk"> おうちのかたが読む（音声を使わず原稿とペースを表示）</label>
     </div>
     <div class="field stock" id="stockInfo"></div>
+    <div class="field">
+      <label>オフラインで つかう（電車・車の中でも できます）</label>
+      <button class="to-report" id="offlineBtn" style="width:100%;margin:0">📥 30話を この端末に ほぞん</button>
+      <div class="dl-bar" id="offlineBar" style="display:none"><i></i></div>
+      <div class="dl-sub" id="offlineNote"></div>
+      <div class="dl-row" id="offlineRow" style="display:none">
+        <button id="offlineStop">やめる</button>
+        <button id="offlineClear">ほぞんを けす</button>
+      </div>
+    </div>
     <button class="to-report" id="soundTest">🔊 おとの テスト（音が出ないとき）</button>
     <div class="field stock" id="soundNote" style="display:none"></div>
     <button class="to-report" id="toReport">📊 せいせきを みる</button>
@@ -464,7 +482,15 @@ function saveCfg(){ localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
 function esc(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 function show(id){ document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active")); document.getElementById(id).classList.add("active"); }
 function toast(msg){ const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),1800); }
-function canonImg(key){ const c=ALIAS[key]||key; return `${CONTENT}images/${esc(c)}.png`; }
+// こども画面は軽量版(448px WebP・1枚 約40KB)を使う。正本の1024px PNG(約1MB)は
+// 検品UI用。回線が細いときの待ち時間とオフライン保存の容量を1/20以下にするため。
+function canonImg(key){ const c=ALIAS[key]||key; return `${CONTENT}images_small/${esc(c)}.webp`; }
+// 軽量版が無い絵は正本PNGにフォールバックし、それも無ければ隠す（文字ラベルだけ残る）
+function imgFallback(el){
+  if(!el.dataset.fb){ el.dataset.fb="1";
+    el.src=el.src.replace("/images_small/","/images/").replace(/\.webp$/,".png"); }
+  else { el.style.visibility="hidden"; }
+}
 function label(id){ return LABELS[id] || id; }
 function maruSVG(hand){ return `<svg class="maru-svg${hand?" k":""}" viewBox="0 0 100 100" aria-hidden="true"><path d="${MARU_PATH}"/></svg>`; }
 function easy(){ return cfg.yasashii && !(session && session.strict); }
@@ -565,12 +591,15 @@ function startReview(){
   const byUnit={};
   due.forEach(x=>{ (byUnit[x.u]=byUnit[x.u]||[]).push(x.q); });
   const queue=[];
+  const savedOnly = !navigator.onLine ? offlineUnits() : null;   // オフラインは保存した話だけ
   Object.keys(byUnit).forEach(uid=>{
+    if(savedOnly && !savedOnly.has(uid)) return;
     const src=MANIFEST.find(it=>it.unit_id===uid); if(!src) return;
     const qs=src.questions.filter(q=>byUnit[uid].indexOf(q.q_id)>=0);
     if(qs.length) queue.push(Object.assign({}, src, {questions:qs}));   // 該当設問だけの複製ユニット
   });
-  if(!queue.length){ toast("きょうは まちがいなおしは ありません"); return; }
+  if(!queue.length){ toast(navigator.onLine ? "きょうは まちがいなおしは ありません"
+                                            : "いま インターネットが ないので まちがいなおしは できません"); return; }
   session={ mode:"review", strict:false, queue, ui:0, unit:queue[0], qi:0, answers:[], results:[] };
   prefetchUnit(session.unit);   // 設問の音声もここで先読みしておく（もんだいへ進んだ瞬間に鳴らす）
   show("play"); audioUnlock().then(()=>runInstruction());
@@ -618,16 +647,27 @@ document.getElementById("calBtn").addEventListener("click", ()=>{ renderGanbari(
 document.getElementById("calBack").addEventListener("click", ()=>show("home"));
 
 // ---------- セッション ----------
-function startSingle(){
+// ネットが無いときは「端末にほぞんした話」だけを出す（音が出ないまま始めさせない）
+function poolForPlay(){
   const pool = poolNow();
-  if(!pool.length){ toast("この レベルの おはなしが まだ ありません"); return; }
+  if(navigator.onLine) return pool;
+  const saved = offlineUnits();
+  return saved.size ? pool.filter(u=>saved.has(u.unit_id)) : [];
+}
+function noPoolToast(){
+  toast(navigator.onLine ? "この レベルの おはなしが まだ ありません"
+                         : "いま インターネットが ありません。ほぞんした おはなしが この せっていに ないよ");
+}
+function startSingle(){
+  const pool = poolForPlay();
+  if(!pool.length){ noPoolToast(); return; }
   session = { mode:"single", strict:false, unit: pool[Math.floor(Math.random()*pool.length)], qi:0, answers:[] };
   prefetchUnit(session.unit);   // 設問の音声もここで先読みしておく（もんだいへ進んだ瞬間に鳴らす）
   show("play"); audioUnlock().then(()=>runInstruction());
 }
 function startMoshi(){
-  const pool = poolNow().slice();
-  if(!pool.length){ toast("この レベルの おはなしが まだ ありません"); return; }
+  const pool = poolForPlay().slice();
+  if(!pool.length){ noPoolToast(); return; }
   for(let i=pool.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [pool[i],pool[j]]=[pool[j],pool[i]]; }
   const queue = pool.slice(0, Math.min(MOSHI_N, pool.length));
   session = { mode:"moshi", strict:true, queue, ui:0, unit:queue[0], qi:0, answers:[], results:[] };
@@ -889,7 +929,7 @@ function runQuestion(){
      <div class="q-grid" style="--mkcolor:${col}">
        ${q.choices.map((c,i)=>`
          <button class="cell" data-i="${i}">
-           <img src="${canonImg(c.image_key)}" onerror="this.style.visibility='hidden'" alt="">
+           <img src="${canonImg(c.image_key)}" onerror="imgFallback(this)" alt="">
            <span class="lab">${esc(label(c.id))}</span>
            <span class="placed">${q.instruction.mark==="maru"?maruSVG(true):esc(mk)}</span>
            <span class="grade">${maruSVG(false)}</span>
@@ -1171,7 +1211,152 @@ function openSettings(){
   pc.checked=!!cfg.parentRead; pc.onchange=(e)=>{ cfg.parentRead=e.target.checked; saveCfg(); };
   const st=document.getElementById("soundTest"); st.onclick=soundTest;
   document.getElementById("soundNote").style.display="none";
+  document.getElementById("offlineBtn").onclick=saveOffline;
+  document.getElementById("offlineStop").onclick=()=>{ offlineAbort=true; };
+  document.getElementById("offlineClear").onclick=clearOffline;
+  renderOffline();
   updateStock(); show("settings");
+}
+
+// ---------- オフライン保存（30話ぶんの音声と絵カードを端末に置く） ----------
+// 置き場所は Service Worker と同じ Cache Storage。SWが未登録でも動くよう、
+// ページ側から直接 cache.put する（SWの fetch はここを見るので再生に使われる）。
+const MEDIA_CACHE = "ohanashi-pro-v2-media";   // ★ play/sw.js の VERSION と合わせる
+const SHELL_CACHE = "ohanashi-pro-v2-shell";
+const OFFLINE_KEY = "ohanashi_pro_offline_v1";
+const OFFLINE_N   = 30;                        // まずは30話（容量をおさえるため）
+let offlineAbort=false, offlineBusy=false, offlineFailed=0;   // offlineFailed=取得できなかった数（検証用）
+
+function offlineState(){ try{ return JSON.parse(localStorage.getItem(OFFLINE_KEY)||"{}"); }catch(e){ return {}; } }
+function offlineUnits(){ return new Set(offlineState().units||[]); }
+function mb(bytes){ return (bytes/1048576).toFixed(1); }
+
+// 保存する話の並び。いまのグループの、いまのレベルを先頭に、近いレベルへ広げていく。
+// （1グループ×1レベルは10話前後しか無いので、それだけでは30話に届かない）
+function offlineCandidates(){
+  const gs=activeGroups(), seen=new Set(), out=[];
+  const order=[cfg.level];
+  for(let d=1;d<=4;d++){ if(cfg.level+d<=5) order.push(cfg.level+d); if(cfg.level-d>=1) order.push(cfg.level-d); }
+  for(const lv of order) for(const u of unitsFor(gs, lv))
+    if(!seen.has(u.unit_id)){ seen.add(u.unit_id); out.push(u); }
+  return out;
+}
+
+// 1話をオフラインで動かすのに必要なURL（本文音声・設問音声・選択肢の絵カード）
+function unitAssets(u){
+  const urls=[CONTENT+u.story_audio];
+  (u.questions||[]).forEach(q=>{
+    if(q.audio) urls.push(CONTENT+q.audio);
+    (q.choices||[]).forEach(c=>{ if(c.image_key) urls.push(canonImg(c.image_key)); });
+  });
+  return [...new Set(urls)];
+}
+
+async function cachePut(url, cache){
+  const hit=await cache.match(url);
+  if(hit){ const b=await hit.blob(); return b.size; }        // すでに保存済み
+  const res=await fetch(url, {cache:"no-store"});
+  if(!res.ok) return 0;
+  await cache.put(url, res.clone());
+  const b=await res.blob();
+  return b.size;
+}
+
+function renderOffline(prog){
+  const note=document.getElementById("offlineNote");
+  const bar=document.getElementById("offlineBar"), row=document.getElementById("offlineRow");
+  const btn=document.getElementById("offlineBtn");
+  if(!note) return;
+  if(prog){                                   // 保存中
+    bar.style.display="block"; row.style.display="flex";
+    document.getElementById("offlineClear").style.display="none";
+    bar.querySelector("i").style.width=Math.round(prog.done/prog.total*100)+"%";
+    note.innerHTML=`ほぞん中… <b>${prog.unitDone} / ${prog.units}話</b>（${mb(prog.bytes)} MB）<br>`
+      + `とじても だいじょうぶですが、この画面のままの方が はやく終わります`;
+    btn.style.display="none";
+    return;
+  }
+  const s=offlineState();
+  bar.style.display="none"; btn.style.display="block";
+  document.getElementById("offlineClear").style.display="block";
+  document.getElementById("offlineStop").style.display="none";
+  if(s.units && s.units.length){
+    row.style.display="flex";
+    const d=s.saved_at?new Date(s.saved_at):null;
+    note.innerHTML=`<b>${s.units.length}話 ほぞんずみ</b>（${mb(s.bytes||0)} MB`
+      + (s.label?` ・ ${esc(s.label)}`:"") + `）`
+      + (d?`<br>${d.getMonth()+1}月${d.getDate()}日に ほぞんしました`:"")
+      + `<br>インターネットが なくても この ${s.units.length}話は できます`;
+    btn.textContent="📥 いまの せっていで もう一度 ほぞん";
+  }else{
+    row.style.display="none";
+    const n=Math.min(OFFLINE_N, offlineCandidates().length);
+    note.innerHTML="まだ ほぞんしていません。<br>いまの グループの おはなしを、"
+      + `いまのレベルから じゅんに <b>${n}話</b>ぶん（おとと え）この端末に ほぞんします。`
+      + "<br>Wi-Fiで 1〜3分・50MBほど つかいます。";
+    btn.textContent=`📥 ${OFFLINE_N}話を この端末に ほぞん`;
+  }
+}
+
+async function saveOffline(){
+  if(offlineBusy) return;
+  const pool=offlineCandidates();
+  if(!pool.length){ toast("この せっていの おはなしが ありません"); return; }
+  const units=pool.slice(0, OFFLINE_N);
+  offlineBusy=true; offlineAbort=false;
+  document.getElementById("offlineStop").style.display="block";
+  try{
+    const media=await caches.open(MEDIA_CACHE), shell=await caches.open(SHELL_CACHE);
+    // データ本体（マニフェスト等）も入れておく。これが無いとオフラインで起動できない。
+    const shellUrls=["/pro/play","/pro/play.webmanifest",
+      CONTENT+"review_manifest.json", CONTENT+"image_alias_map.json",
+      CONTENT+"choice_labels.json", CONTENT+"defect_units.json"];
+    const lists=units.map(unitAssets);
+    const total=shellUrls.length + lists.reduce((n,l)=>n+l.length,0);
+    let done=0, bytes=0, unitDone=0, failed=0; offlineFailed=0;
+    const tick=()=>renderOffline({done,total,bytes,unitDone,units:units.length});
+    tick();
+    for(const u of shellUrls){ bytes+=await cachePut(u, shell); done++; tick(); }
+    for(let i=0;i<lists.length;i++){
+      for(const url of lists[i]){
+        if(offlineAbort) break;
+        const n=await cachePut(url, media);
+        if(!n){ failed++; offlineFailed++; console.warn("[offline] 取得できず", url); }
+        bytes+=n; done++;
+        if(done%4===0) tick();
+      }
+      if(offlineAbort) break;
+      unitDone++; tick();
+    }
+    const saved=units.slice(0, unitDone).map(u=>u.unit_id);
+    const lvs=[...new Set(units.slice(0, unitDone).map(u=>u.level))].sort();
+    const label=`グループ${activeGroups().join("・")} ・ レベル${lvs.join("・")}`;
+    localStorage.setItem(OFFLINE_KEY, JSON.stringify(
+      {units:saved, bytes, saved_at:new Date().toISOString(), label}));
+    renderOffline();
+    toast(offlineAbort ? `${saved.length}話まで ほぞんしました`
+                       : `${saved.length}話を ほぞんしました（${mb(bytes)} MB）`);
+    if(failed) console.warn("[offline] 取得できなかったファイル", failed, "件");
+  }catch(e){
+    console.error("[offline]", e);
+    renderOffline();
+    toast("ほぞんに しっぱいしました");
+  }finally{
+    offlineBusy=false; offlineAbort=false;
+    document.getElementById("offlineStop").style.display="none";
+  }
+}
+
+async function clearOffline(){
+  const s=offlineState();
+  if(!s.units || !s.units.length) return;
+  const media=await caches.open(MEDIA_CACHE);
+  const targets=new Set();
+  s.units.forEach(id=>{ const u=MANIFEST.find(x=>x.unit_id===id); if(u) unitAssets(u).forEach(x=>targets.add(x)); });
+  for(const url of targets) await media.delete(url);
+  localStorage.removeItem(OFFLINE_KEY);
+  renderOffline();
+  toast("ほぞんを けしました");
 }
 // 実機（とくにiPhone）で音が出ないときの切り分け。短い設問音声を1本鳴らして状態を出す。
 function soundDiag(){

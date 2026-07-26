@@ -56,6 +56,14 @@
   textarea { width: 100%; min-height: 64px; margin-top: 10px; border: 1px solid #ddd6c2;
              border-radius: 10px; padding: 10px; font-size: 14px; font-family: inherit; }
   .empty { text-align: center; padding: 60px 20px; color: var(--gray); }
+  .filters { position: sticky; top: 68px; z-index: 4; background: var(--paper);
+             border-bottom: 1px solid #e5e0d2; padding: 10px 12px;
+             display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .filters select { min-height: 40px; font-size: 14px; font-family: inherit; color: var(--navy);
+                    background: #fff; border: 1px solid #ddd6c2; border-radius: 8px; padding: 0 8px; }
+  .filters label { font-size: 12px; color: var(--gray); }
+  .badge.fix { color: var(--green); border-color: var(--green); }
+  .badge.def { color: #fff; background: #b9a17a; border-color: #b9a17a; }
 </style>
 </head>
 <body>
@@ -63,6 +71,22 @@
   <h1>検品キュー</h1>
   <button id="exportBtn">JSON書き出し</button>
 </header>
+<div class="filters">
+  <label for="fView">見るもの</label>
+  <select id="fView">
+    <option value="sample">各グループ5問サンプル（25話）</option>
+    <option value="repaired">今日 作り直した21話</option>
+    <option value="all">ぜんぶ（出題中の245話）</option>
+    <option value="defect">見直し中の7話（出題から除外）</option>
+    <option value="todo">まだ判定していないもの</option>
+  </select>
+  <select id="fGroup"><option value="">グループ：ぜんぶ</option></select>
+  <select id="fLevel">
+    <option value="">レベル：ぜんぶ</option>
+    <option value="1">Lv1</option><option value="2">Lv2</option><option value="3">Lv3</option>
+    <option value="4">Lv4</option><option value="5">Lv5</option>
+  </select>
+</div>
 <div class="progress" id="progress">読み込み中…</div>
 <div class="list" id="list"></div>
 
@@ -70,8 +94,12 @@
 const STORE_KEY = "ohanashi_pro_review_v1";
 const CONTENT = "/pro/content/";
 const SPEED_FACTOR = 1.25;  // 本文は音声自体を1.25倍速で合成済み(想定秒数の表示換算用)
+const FILTER_KEY = "ohanashi_pro_review_filter_v1";
 const store = JSON.parse(localStorage.getItem(STORE_KEY) || "{}");
-let items = [];
+let allItems = [];   // マニフェスト全252話
+let items = [];      // いま画面に出している分（フィルタ後）
+let DEFECT = new Set();    // 検品で欠陥確定→出題から除外中（defect_units.json の units）
+let REPAIRED = new Set();  // 本文から作り直して隔離解除した話（released_* の和集合）
 let ALIAS = {};  // image_key(表記ゆれ) → 正規スラッグ (image_alias_map.json)
 let LABELS = {}; // choice id(ローマ字) → ひらがな表示名 (choice_labels.json)
 
@@ -87,8 +115,61 @@ function save() { localStorage.setItem(STORE_KEY, JSON.stringify(store)); render
 
 function renderProgress() {
   const done = items.filter(it => store[it.unit_id] && store[it.unit_id].result).length;
-  document.getElementById("progress").textContent =
-    items.length ? `判定済み ${done} / ${items.length} 件` : "検品対象がありません";
+  const judgedAll = allItems.filter(it => store[it.unit_id] && store[it.unit_id].result).length;
+  document.getElementById("progress").textContent = items.length
+    ? `いま表示 ${items.length}話（判定済み ${done}）／ 全体の判定済み ${judgedAll} / ${allItems.length}話`
+    : "この条件に当てはまるお話がありません";
+}
+
+// 文字列から決まった数を作る（サンプルが毎回同じ25話になるように＝再現できる抜き取り）
+function seedHash(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0);
+}
+
+// 各グループから5話。レベルが散るようにLv1〜5から1話ずつ拾い、足りない分は他レベルで補う。
+function sampleUnits(pool) {
+  const out = [];
+  const groups = [...new Set(pool.map(u => u.group || "-"))].sort();
+  for (const g of groups) {
+    const mine = pool.filter(u => (u.group || "-") === g);
+    const picked = [];
+    for (let lv = 1; lv <= 5; lv++) {
+      const c = mine.filter(u => u.level === lv);
+      if (c.length) picked.push(c[seedHash(g + "|" + lv) % c.length]);
+    }
+    const rest = mine.filter(u => !picked.includes(u));
+    let i = 0;
+    while (picked.length < 5 && rest.length) {
+      picked.push(rest[seedHash(g + "|fill" + (i++)) % rest.length]);
+      // 同じ話を二度入れない
+      for (let k = picked.length - 1; k > 0; k--) {
+        if (picked.indexOf(picked[k]) !== k) { picked.splice(k, 1); break; }
+      }
+      if (i > 50) break;
+    }
+    out.push(...picked.slice(0, 5));
+  }
+  return out;
+}
+
+function applyFilter() {
+  const view = document.getElementById("fView").value;
+  const g = document.getElementById("fGroup").value;
+  const lv = document.getElementById("fLevel").value;
+  localStorage.setItem(FILTER_KEY, JSON.stringify({ view, g, lv }));
+
+  const live = allItems.filter(it => !DEFECT.has(it.unit_id));   // 出題中の245話
+  let base;
+  if (view === "defect")        base = allItems.filter(it => DEFECT.has(it.unit_id));
+  else if (view === "repaired") base = allItems.filter(it => REPAIRED.has(it.unit_id));
+  else if (view === "sample")   base = sampleUnits(live);
+  else if (view === "todo")     base = live.filter(it => !(store[it.unit_id] || {}).result);
+  else                          base = live;
+
+  items = base.filter(it => (!g || (it.group || "-") === g) && (!lv || it.level === Number(lv)));
+  render();
 }
 
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
@@ -106,7 +187,9 @@ const COLOR = {aka:"赤", ao:"青", midori:"緑", kuro:"黒", kiiro:"黄"};
 function render() {
   const list = document.getElementById("list");
   if (!items.length) {
-    list.innerHTML = '<div class="empty">review_manifest.json がありません。<br>先に pipeline/audio.py を実行してください。</div>';
+    list.innerHTML = allItems.length
+      ? '<div class="empty">この条件に当てはまるお話がありません。<br>上の「見るもの」やグループ・レベルを変えてください。</div>'
+      : '<div class="empty">review_manifest.json がありません。<br>先に pipeline/audio.py を実行してください。</div>';
     renderProgress();
     return;
   }
@@ -120,7 +203,9 @@ function render() {
           <div class="title">${esc(it.theme)}</div>
           <div class="meta">${esc(it.unit_id)} ・ ${it.char_count}字 ・ 目標${Math.round(it.expected_duration_sec / SPEED_FACTOR)}秒(1.25倍速)${it.measured_duration_sec ? ` / 実測${Math.round(it.measured_duration_sec)}秒` : ""}</div>
         </div>
-        ${badge(it.unit_id)}
+        ${REPAIRED.has(it.unit_id) ? '<span class="badge fix">作り直し</span>' : ""}
+        ${DEFECT.has(it.unit_id) ? '<span class="badge def">見直し中</span>' : ""}
+        <span id="st-${idx}">${badge(it.unit_id)}</span>
       </div>
       <div class="detail">
         <div class="q-head">📖 本文（morioki・1.25倍速合成）</div>
@@ -162,8 +247,7 @@ function judge(unitId, result, idx) {
   const card = document.getElementById("card-" + idx);
   card.querySelector(".ok-btn").classList.toggle("active", result === "OK");
   card.querySelector(".ng-btn").classList.toggle("active", result === "NG");
-  card.querySelector(".card-head").innerHTML = card.querySelector(".card-head").innerHTML
-    .replace(/<span class="badge (ok|ng|todo)">.*?<\/span>$/, badge(unitId));
+  document.getElementById("st-" + idx).innerHTML = badge(unitId);
 }
 
 function memo(unitId, value) {
@@ -172,12 +256,18 @@ function memo(unitId, value) {
 }
 
 document.getElementById("exportBtn").addEventListener("click", () => {
+  // 画面のフィルタに関係なく「判定・メモがついているもの全部」を書き出す（取りこぼし防止）
+  const judged = allItems.filter(it => {
+    const j = store[it.unit_id] || {};
+    return j.result || (j.memo || "").trim();
+  });
   const out = {
     exported_at: new Date().toISOString(),
-    total: items.length,
-    judged: items.filter(it => store[it.unit_id] && store[it.unit_id].result).length,
-    results: items.map(it => ({
-      unit_id: it.unit_id, level: it.level, theme: it.theme,
+    total: allItems.length,
+    judged: judged.length,
+    results: judged.map(it => ({
+      unit_id: it.unit_id, group: it.group || null, level: it.level, theme: it.theme,
+      repaired: REPAIRED.has(it.unit_id), quarantined: DEFECT.has(it.unit_id),
       result: (store[it.unit_id] || {}).result || null,
       memo: (store[it.unit_id] || {}).memo || "",
       judged_at: (store[it.unit_id] || {}).at || null,
@@ -198,8 +288,28 @@ Promise.all([
     .then(r => r.ok ? r.json() : {}).catch(() => ({})),
   fetch(CONTENT + "choice_labels.json")
     .then(r => r.ok ? r.json() : {}).catch(() => ({})),
-]).then(([data, alias, labels]) => {
-  items = data.items || []; ALIAS = alias || {}; LABELS = labels || {}; render();
+  fetch(CONTENT + "defect_units.json")
+    .then(r => r.ok ? r.json() : {}).catch(() => ({})),
+]).then(([data, alias, labels, defects]) => {
+  allItems = data.items || []; ALIAS = alias || {}; LABELS = labels || {};
+  DEFECT = new Set(defects.units || []);
+  // released_* キー（隔離解除の履歴）をすべて「作り直し」として扱う
+  REPAIRED = new Set(Object.keys(defects)
+    .filter(k => k.startsWith("released"))
+    .flatMap(k => Array.isArray(defects[k]) ? defects[k] : []));
+
+  const gsel = document.getElementById("fGroup");
+  [...new Set(allItems.map(it => it.group).filter(Boolean))].sort()
+    .forEach(g => gsel.insertAdjacentHTML("beforeend", `<option value="${esc(g)}">グループ ${esc(g)}</option>`));
+
+  const saved = JSON.parse(localStorage.getItem(FILTER_KEY) || "{}");
+  if (saved.view) document.getElementById("fView").value = saved.view;
+  if (saved.g) gsel.value = saved.g;
+  if (saved.lv) document.getElementById("fLevel").value = saved.lv;
+
+  ["fView", "fGroup", "fLevel"].forEach(id =>
+    document.getElementById(id).addEventListener("change", applyFilter));
+  applyFilter();
 });
 </script>
 </body>

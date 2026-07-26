@@ -147,7 +147,10 @@ def draft_prompts(vocab: dict, model: str = "claude-sonnet-5"):
     client = anthropic.Anthropic()
     targets = {k: v for k, v in vocab.items() if v["kind"] in ("ai", "count") and not v.get("prompt")}
     keys = sorted(targets.keys())
-    BATCH = 50
+    # sonnet-5 は思考に出力トークンを使うため、max_tokens が小さいと本文が空で返る
+    # （2026-07-26: BATCH=50 / max_tokens=8000 で50件ぶんのバッチが3回連続で空応答になった）。
+    BATCH = 20
+    MAX_TOKENS = 20000
     for i in range(0, len(keys), BATCH):
         batch = keys[i:i + BATCH]
         lines = []
@@ -168,10 +171,14 @@ def draft_prompts(vocab: dict, model: str = "claude-sonnet-5"):
         )
         data = None
         for attempt in range(3):
-            resp = client.messages.create(model=model, max_tokens=8000,
+            resp = client.messages.create(model=model, max_tokens=MAX_TOKENS,
                                           messages=[{"role": "user", "content": prompt}])
             text = "".join(b.text for b in resp.content if b.type == "text")
             text = text.replace("```json", "").replace("```", "").strip()
+            if not text:
+                print(f"  [draft] 応答が空({attempt + 1}回目) stop_reason={resp.stop_reason} "
+                      f"out_tokens={resp.usage.output_tokens} → リトライ", flush=True)
+                continue
             try:
                 data = json.loads(text[text.find("{"):text.rfind("}") + 1])
                 break

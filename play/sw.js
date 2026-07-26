@@ -12,6 +12,7 @@ const SHELL_ASSETS = [
   "/pro/content/review_manifest.json",
   "/pro/content/image_alias_map.json",
   "/pro/content/choice_labels.json",
+  "/pro/content/defect_units.json",
 ];
 
 self.addEventListener("install", (e) => {
@@ -30,7 +31,10 @@ self.addEventListener("activate", (e) => {
   );
 });
 
-function isImage(url) { return url.pathname.startsWith("/pro/content/images/"); }
+function isImage(url) {
+  return url.pathname.startsWith("/pro/content/images/")        // 正本(1024px PNG・検品UI)
+      || url.pathname.startsWith("/pro/content/images_small/"); // 軽量版(448px WebP・こども画面)
+}
 function isAudio(url) { return url.pathname.endsWith(".mp3"); }
 
 self.addEventListener("fetch", (e) => {
