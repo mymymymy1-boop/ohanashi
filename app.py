@@ -64,13 +64,27 @@ LOG_FILE  = BASE / "usage_log.csv"
 app = Flask(__name__, static_folder=str(BASE / "static"))
 
 # ---------------- 簡易パスワード保護（クレジット悪用防止） ----------------
+# お金がかかる（Anthropic/ElevenLabsを呼ぶ）経路。パスワード未設定なら「公開しない」。
+# 2026-07-29: VPS本番は APP_PASSWORD が空のまま公開されており、
+# `curl https://.../api/pack/start` だけで10話ぶんの生成ジョブが起動できる状態だった。
+COST_PREFIXES = ("/api/", "/compare", "/pack")
+
+
+def _costs_money(path: str) -> bool:
+    return path.startswith(COST_PREFIXES)
+
+
 @app.before_request
 def _require_auth():
     # ヘルスチェックは認証不要（外形監視・Renderのプローブが401で弾かれないように）
     if request.path == "/healthz":
         return
-    # APP_PASSWORD 未設定（ローカル開発）なら認証なしで通す
+    # APP_PASSWORD 未設定（ローカル開発／こども用PROアプリだけを公開している運用）
     if not APP_PASSWORD:
+        if _costs_money(request.path):
+            # こども用 /pro/ は公開のまま、課金経路だけ閉じる（フェイルクローズド）
+            print(f"[auth] 課金APIを遮断 path={request.path} ip={request.remote_addr}", flush=True)
+            return jsonify({"error": "この機能は停止しています（APP_PASSWORD が未設定のため）"}), 503
         return
     auth = request.authorization
     if auth and hmac.compare_digest(auth.username or "", APP_USERNAME) \
