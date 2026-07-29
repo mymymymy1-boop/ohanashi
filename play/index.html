@@ -76,7 +76,7 @@
 
   /* ---- 出題 ---- */
   #play{ background:var(--paper); }
-  .stage{ position:relative; z-index:1; flex:1; display:flex; flex-direction:column; }
+  .stage{ position:relative; z-index:1; flex:1; min-height:0; display:flex; flex-direction:column; }
   .stage-center{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:24px; padding:24px; }
   .speak{ font-family:var(--maru); font-size:23px; font-weight:800; line-height:1.65; color:var(--navy); max-width:640px; }
   .speak small{ display:block; font-size:16px; color:var(--ink-soft); font-weight:700; margin-top:8px; }
@@ -107,7 +107,10 @@
   .chip{ font-family:var(--maru); font-size:13px; font-weight:800; color:#fff; padding:4px 11px; border-radius:7px; background:var(--mkcolor,var(--shu)); letter-spacing:.05em; }
   .replay{ width:52px; height:52px; border-radius:50%; border:2px solid rgba(32,48,79,.2); background:#fff; font-size:24px; color:var(--navy); cursor:pointer; flex:0 0 auto; }
   .replay:disabled{ opacity:.28; }
-  .q-grid{ flex:1; display:grid; grid-template-columns:1fr 1fr; gap:14px; padding:8px 16px 4px; align-content:center; max-width:720px; width:100%; margin:0 auto; }
+  /* min-height:0 と overflow:auto が無いと、画面が低い端末(iPhone SE)で
+     選択肢がフッターを押し出し、「けってい」や「つぎへ」が画面外に出て押せなくなる */
+  .q-grid{ flex:1; min-height:0; overflow:auto; display:grid; grid-template-columns:1fr 1fr; gap:14px;
+           padding:8px 16px 4px; align-content:center; max-width:720px; width:100%; margin:0 auto; }
   .cell{ position:relative; background:#fffdf8; border:3px solid var(--line); border-radius:18px; padding:11px 9px 8px;
          display:flex; flex-direction:column; align-items:center; gap:6px; min-height:150px; cursor:pointer; transition:border-color .14s; }
   .cell img{ width:100%; max-height:150px; aspect-ratio:1; object-fit:contain; }
@@ -124,11 +127,27 @@
   .cell.reveal-correct{ border-color:var(--shu); }
   .cell.reveal-wrong{ opacity:.4; }
   .cell.locked{ cursor:default; }
-  .q-foot{ padding:12px 16px calc(16px + env(safe-area-inset-bottom)); }
+  /* position/z-index が無いと、位置指定済みの .paperbg(z-index:0) が上に描かれて
+     ボタンが「見えないのに押せる」状態になる（pointer-events:none なのでテストは通ってしまう） */
+  .q-foot{ position:relative; z-index:1; flex:0 0 auto; padding:10px 16px calc(12px + env(safe-area-inset-bottom)); }
   .kettei{ width:100%; font-family:var(--maru); font-weight:800; font-size:24px; color:#fff; background:var(--shu);
            border:none; border-radius:18px; padding:18px; cursor:pointer; box-shadow:0 5px 0 var(--shu-ink); }
   .kettei:active{ transform:translateY(3px); box-shadow:0 2px 0 var(--shu-ink); }
   .kettei:disabled{ background:#c7bda6; box-shadow:0 5px 0 #b0a68e; cursor:default; }
+  /* 「わからない → つぎへ」。答えを選べない/選ばない子が必ず先へ進めるようにする */
+  .tsugi{ width:100%; margin-top:7px; min-height:46px; font-family:var(--maru); font-weight:800; font-size:16px;
+          color:var(--navy); background:#fff; border:2px solid #cfc6ae; border-radius:14px; cursor:pointer; }
+  .tsugi:active{ transform:translateY(2px); }
+  .tsugi.urge{ color:#fff; background:var(--shu); border-color:var(--shu-ink); box-shadow:0 4px 0 var(--shu-ink); }
+  .jikan{ text-align:center; font-family:var(--maru); font-weight:800; font-size:15px; color:var(--shu); margin-top:8px; }
+  /* 画面の低い端末(iPhone SE等)では選択肢を少し詰めて、4枚とボタンが一画面に収まるようにする */
+  @media (max-height:700px){
+    .cell{ min-height:118px; padding:8px 7px 6px; }
+    .cell img{ max-height:100px; }
+    .cell .lab{ font-size:17px; }
+    .q-grid{ gap:10px; padding:6px 12px 2px; }
+    .kettei{ font-size:21px; padding:13px; }
+  }
 
   /* ---- まちがい直し（バッジ付きボタン） ---- */
   .review-btn{ position:relative; font-family:var(--maru); font-weight:800; font-size:18px; color:var(--shu);
@@ -324,6 +343,8 @@
   <div class="stage" id="stage"></div>
   <div class="q-foot" id="confirmWrap" style="display:none">
     <button class="kettei" id="confirmBtn" disabled>けってい</button>
+    <div class="jikan" id="jikanNote" style="display:none">じかんだよ</div>
+    <button class="tsugi" id="skipBtn">わからない → つぎへ</button>
   </div>
 </section>
 
@@ -949,17 +970,36 @@ function runQuestion(){
   });
   document.getElementById("replayBtn").onclick=(e)=>{ e.currentTarget.disabled=true; playAudio(CONTENT+q.audio); };
   confirm.onclick=()=>{ if(picked.size) grade(q, picked); };
-  playAudio(CONTENT + q.audio).then(()=>startRing(q));
+
+  // 「わからない → つぎへ」。答えが分からない子が設問で詰まないための逃げ道。
+  // 選んでいなければ未回答（＝不正解）として記録し、正解を見せてから次の設問へ進む。
+  const skip=document.getElementById("skipBtn"), note=document.getElementById("jikanNote");
+  skip.className="tsugi"; skip.textContent="わからない → つぎへ"; skip.disabled=false;
+  note.style.display="none";
+  skip.onclick=()=>grade(q, picked);
+
+  // 制限時間が切れたら「つぎへ」を目立たせる。模試(strict)は本番どおり自動で先へ進む。
+  const onTimeUp=()=>{
+    if(skip.disabled) return;                 // すでに採点済み
+    note.style.display="block";
+    skip.classList.add("urge");
+    skip.textContent = picked.size ? "つぎへ ▶" : "わからない → つぎへ";
+    if(session.strict) setTimeout(()=>{ if(!skip.disabled) grade(q, picked); }, 1200);
+  };
+  playAudio(CONTENT + q.audio).then(()=>startRing(q, onTimeUp));
 }
-function startRing(q){
+function startRing(q, onTimeUp){
   const fg=document.getElementById("ringFg"); if(!fg) return;
-  let limit=TIME_LIMIT[q.level]||15; if(easy()) limit=Math.round(limit*1.5);
+  // 制限時間はお話のレベルで決まる。設問オブジェクトに level は無い（＝以前は全レベル15秒固定になっていた）
+  let limit=TIME_LIMIT[(session.unit&&session.unit.level)||q.level]||15;
+  if(easy()) limit=Math.round(limit*1.5);
   const total=151, t0=performance.now();
   (function tick(now){
     if(document.getElementById("ringFg")!==fg) return;
     const p=Math.min(1,(now-t0)/(limit*1000));
     fg.setAttribute("stroke-dashoffset",(total*p).toFixed(1));
     if(p<1) requestAnimationFrame(tick);
+    else if(onTimeUp) onTimeUp();
   })(t0);
 }
 // STEP4: 採点
@@ -971,6 +1011,9 @@ function grade(q, picked){
   session.answers.push({q_id:q.q_id, type:q.type, correct:ok});
   scheduleReview(session.unit.unit_id, q.q_id, ok);   // 誤答は翌日へ／正解なら間隔を延ばす
   document.getElementById("confirmBtn").disabled=true;
+  const sk=document.getElementById("skipBtn");
+  if(sk){ sk.disabled=true; sk.className="tsugi"; sk.textContent="つぎの もんだいへ…"; }
+  document.getElementById("jikanNote").style.display="none";
   const rb=document.getElementById("replayBtn"); if(rb) rb.disabled=true;
   stage.querySelectorAll(".cell").forEach((btn,i)=>{
     btn.classList.add("locked");
@@ -1012,7 +1055,8 @@ function showSingleResult(ok, n){
   const rs=document.getElementById("resStamp"); rs.style.display="flex";
   const stamp = perfect?"🌸":(ok>=Math.ceil(n/2)?"🎏":"🌱");
   rs.innerHTML=`<div class="slot new">${stamp}</div><div class="slot">＋</div><div class="cap">スタンプ帳に<br><b style="color:var(--shu)">スタンプ</b>が おされたよ</div>`;
-  const again=document.getElementById("resAgain"); again.textContent="もういちど"; again.onclick=startSingle;
+  // startSingle は別のお話をランダムに選ぶので「もういちど」では意味が伝わらない
+  const again=document.getElementById("resAgain"); again.textContent="つぎの おはなし ▶"; again.onclick=startSingle;
   show("result");
   const el=document.getElementById("resScoreN"); let c=0; clearInterval(el._t);
   el._t=setInterval(()=>{ c++; el.textContent=c; if(c>=ok||ok===0){ el.textContent=ok; clearInterval(el._t);} }, 170);
