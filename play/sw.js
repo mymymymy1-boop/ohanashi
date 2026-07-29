@@ -31,6 +31,9 @@ self.addEventListener("activate", (e) => {
   );
 });
 
+// この起動中に裏で取り直したURL（同じ素材を何度も取りに行かないため）
+const revalidated = new Set();
+
 function isImage(url) {
   return url.pathname.startsWith("/pro/content/images/")        // 正本(1024px PNG・検品UI)
       || url.pathname.startsWith("/pro/content/images_small/"); // 軽量版(448px WebP・こども画面)
@@ -48,14 +51,22 @@ self.addEventListener("fetch", (e) => {
   if (req.headers.has("range")) return;
 
   if (isImage(url) || isAudio(url)) {
-    // 画像・音声: キャッシュ優先 → なければ取得してキャッシュ（オフライン再生）。
-    // 音声はアプリ側が fetch → blob で鳴らすので、ここに来るのは Rangeなしの通常GETだけ。
+    // 画像・音声: キャッシュ優先で即返しつつ、裏で取り直して次回に備える（stale-while-revalidate）。
+    // 完全なキャッシュ優先だと、作り直した音声に差し替えても古い音声が鳴り続ける
+    // （2026-07-26 に28話の音声を差し替えた実績があり、実際に起こりうる）。
+    // 同じURLの再取得は1セッション1回だけにして通信量を増やさない。
     e.respondWith(
       caches.open(MEDIA).then((cache) =>
-        cache.match(req).then((hit) =>
-          hit || fetch(req).then((res) => { if (res.status === 200) cache.put(req, res.clone()); return res; })
-                       .catch(() => hit)
-        )
+        cache.match(req).then((hit) => {
+          const fresh = () =>
+            fetch(req).then((res) => { if (res.status === 200) cache.put(req, res.clone()); return res; });
+          if (!hit) return fresh().catch(() => hit);
+          if (!revalidated.has(url.href)) {
+            revalidated.add(url.href);
+            e.waitUntil(fresh().catch(() => {}));   // オフラインなら黙って諦める
+          }
+          return hit;
+        })
       )
     );
     return;

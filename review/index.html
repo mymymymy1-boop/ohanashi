@@ -75,9 +75,9 @@
   <label for="fView">見るもの</label>
   <select id="fView">
     <option value="sample">各グループ5問サンプル（25話）</option>
-    <option value="repaired">今日 作り直した21話</option>
-    <option value="all">ぜんぶ（出題中の245話）</option>
-    <option value="defect">見直し中の7話（出題から除外）</option>
+    <option value="repaired">作り直した話</option>
+    <option value="all">ぜんぶ（出題中）</option>
+    <option value="defect">見直し中（出題から除外）</option>
     <option value="todo">まだ判定していないもの</option>
   </select>
   <select id="fGroup"><option value="">グループ：ぜんぶ</option></select>
@@ -95,7 +95,9 @@ const STORE_KEY = "ohanashi_pro_review_v1";
 const CONTENT = "/pro/content/";
 const SPEED_FACTOR = 1.25;  // 本文は音声自体を1.25倍速で合成済み(想定秒数の表示換算用)
 const FILTER_KEY = "ohanashi_pro_review_filter_v1";
-const store = JSON.parse(localStorage.getItem(STORE_KEY) || "{}");
+const store = (() => { try { const v=JSON.parse(localStorage.getItem(STORE_KEY)||"{}");
+    return (v && typeof v==="object" && !Array.isArray(v)) ? v : {}; }
+  catch(e){ console.warn("判定の記録が壊れていたので無視します", e); return {}; } })();
 let allItems = [];   // マニフェスト全252話
 let items = [];      // いま画面に出している分（フィルタ後）
 let DEFECT = new Set();    // 検品で欠陥確定→出題から除外中（defect_units.json の units）
@@ -227,11 +229,11 @@ function render() {
             </div>
           </div>`).join("")}
         <div class="judge">
-          <button class="ok-btn ${j.result==="OK"?"active":""}" onclick="judge('${it.unit_id}','OK',${idx})">OK ○</button>
-          <button class="ng-btn ${j.result==="NG"?"active":""}" onclick="judge('${it.unit_id}','NG',${idx})">NG ✕</button>
+          <button class="ok-btn ${j.result==="OK"?"active":""}" onclick="judge('${esc(it.unit_id)}','OK',${idx})">OK ○</button>
+          <button class="ng-btn ${j.result==="NG"?"active":""}" onclick="judge('${esc(it.unit_id)}','NG',${idx})">NG ✕</button>
         </div>
         <textarea placeholder="メモ（誤読・間・アクセント など）"
-          onchange="memo('${it.unit_id}', this.value)">${esc(j.memo || "")}</textarea>
+          oninput="memo('${esc(it.unit_id)}', this.value)">${esc(j.memo || "")}</textarea>
       </div>
     </div>`;
   }).join("");
@@ -298,6 +300,12 @@ Promise.all([
     .filter(k => k.startsWith("released"))
     .flatMap(k => Array.isArray(defects[k]) ? defects[k] : []));
 
+  // 選択肢のラベルに実際の件数を入れる（数字を直書きすると古くなる）
+  const live = allItems.filter(it => !DEFECT.has(it.unit_id)).length;
+  const setOpt=(v,t)=>{ const o=document.querySelector(`#fView option[value="${v}"]`); if(o) o.textContent=t; };
+  setOpt("repaired", `作り直した${REPAIRED.size}話`);
+  setOpt("all", `ぜんぶ（出題中の${live}話）`);
+  setOpt("defect", `見直し中の${DEFECT.size}話（出題から除外）`);
   const gsel = document.getElementById("fGroup");
   [...new Set(allItems.map(it => it.group).filter(Boolean))].sort()
     .forEach(g => gsel.insertAdjacentHTML("beforeend", `<option value="${esc(g)}">グループ ${esc(g)}</option>`));

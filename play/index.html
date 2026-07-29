@@ -2,7 +2,8 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<!-- 拡大は許可する（保護者が原稿や成績表の細かい字を読めなくなるため）。誤タップ対策は touch-action で行う -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5">
 <meta name="theme-color" content="#F3ECDC">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -27,6 +28,7 @@
     --sans:"Hiragino Sans","Noto Sans JP","Yu Gothic",sans-serif;
   }
   *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-user-select:none; user-select:none; }
+  button, .cell, .opt{ touch-action:manipulation; }   /* ダブルタップ拡大の遅延・誤作動を防ぐ */
   html,body{ height:100%; }
   body{ margin:0; font-family:var(--maru); color:var(--ink);
         background:var(--paper); overflow:hidden; -webkit-font-smoothing:antialiased; }
@@ -40,7 +42,7 @@
       repeating-linear-gradient(transparent 0 39px, var(--rule) 39px 40px),
       linear-gradient(180deg,var(--paper-hi),var(--paper));
     background-position:0 60px,0 0; }
-  .sheet-head{ position:relative; z-index:1; display:flex; align-items:center; gap:8px;
+  .sheet-head{ position:relative; z-index:1; flex:0 0 auto; display:flex; align-items:center; gap:8px;
                padding:12px 18px; font-size:11px; letter-spacing:.18em; color:var(--ink-soft);
                border-bottom:1.5px solid rgba(32,48,79,.18); font-family:var(--sans); }
   .sheet-head .no{ margin-left:auto; border:1.2px solid rgba(32,48,79,.3); border-radius:5px;
@@ -54,7 +56,10 @@
 
   /* ---- ホーム ---- */
   #home{ align-items:center; justify-content:center; text-align:center; }
-  .home-body{ position:relative; z-index:1; display:flex; flex-direction:column; align-items:center; gap:22px; padding:24px; }
+  /* overflow:auto と min-height:0 が無いと、画面が低い端末や横向きで
+     下のボタン（がんばり・おうちのかた等）に到達できなくなる（2026-07-29 実測で確認） */
+  .home-body{ position:relative; z-index:1; display:flex; flex-direction:column; align-items:center;
+              gap:22px; padding:24px; overflow:auto; min-height:0; width:100%; }
   .brand{ position:relative; padding:30px 34px; }
   .brand .maru-svg{ position:absolute; inset:-8px -4px; width:calc(100% + 8px); height:calc(100% + 18px); transform:rotate(-4deg); }
   .brand h1{ font-family:var(--serif); font-size:clamp(34px,9vw,46px); margin:0; letter-spacing:.06em; color:var(--navy); font-weight:600; }
@@ -140,6 +145,24 @@
   .tsugi:active{ transform:translateY(2px); }
   .tsugi.urge{ color:#fff; background:var(--shu); border-color:var(--shu-ink); box-shadow:0 4px 0 var(--shu-ink); }
   .jikan{ text-align:center; font-family:var(--maru); font-weight:800; font-size:15px; color:var(--shu); margin-top:8px; }
+  /* ---- 確認ダイアログ ---- */
+  .ask-ov{ position:fixed; inset:0; z-index:60; display:none; align-items:center; justify-content:center;
+           background:rgba(32,48,79,.45); padding:20px; }
+  .ask-ov.show{ display:flex; }
+  .ask-card{ background:#fffdf8; border-radius:20px; padding:22px 20px; max-width:360px; width:100%;
+             box-shadow:0 12px 40px rgba(0,0,0,.25); text-align:center; }
+  .ask-title{ font-family:var(--maru); font-size:20px; font-weight:800; color:var(--navy); line-height:1.6; }
+  .ask-sub{ font-family:var(--maru); font-size:14px; color:var(--ink-soft); margin-top:8px; line-height:1.7; }
+  .ask-row{ display:flex; gap:10px; margin-top:18px; }
+  .ask-row button{ flex:1; min-height:52px; border-radius:14px; font-family:var(--maru);
+                   font-size:17px; font-weight:800; cursor:pointer; }
+  .ask-no{ border:2px solid #cfc6ae; background:#fff; color:var(--navy); }
+  .ask-yes{ border:none; background:var(--shu); color:#fff; box-shadow:0 4px 0 var(--shu-ink); }
+  /* ---- 出題中に「やめる」（右上・小さめ・確認あり） ---- */
+  .quit-btn{ position:absolute; top:calc(6px + env(safe-area-inset-top)); right:10px; z-index:3;
+             width:40px; height:40px; border-radius:50%; border:1.5px solid rgba(32,48,79,.25);
+             background:rgba(255,253,248,.9); color:var(--ink-soft); font-size:17px; font-weight:700;
+             cursor:pointer; line-height:1; }
   /* 画面の低い端末(iPhone SE等)では選択肢を少し詰めて、4枚とボタンが一画面に収まるようにする */
   @media (max-height:700px){
     .cell{ min-height:118px; padding:8px 7px 6px; }
@@ -170,7 +193,10 @@
 
   /* ---- けっか ---- */
   #result{ align-items:center; justify-content:center; text-align:center; }
-  .result-body{ position:relative; z-index:1; display:flex; flex-direction:column; align-items:center; gap:18px; padding:24px; width:100%; max-width:420px; }
+  /* 同上。まちがいなおしの結果は行数が伸びるので、スクロールできないと
+     「つづける／おうちへ」が押せずホームに戻れなくなる */
+  .result-body{ position:relative; z-index:1; display:flex; flex-direction:column; align-items:center;
+                gap:18px; padding:24px; width:100%; max-width:420px; overflow:auto; min-height:0; }
   .hanamaru{ font-size:80px; line-height:1; }
   .score{ font-family:var(--serif); font-size:26px; color:var(--navy); margin:0; }
   .score b{ color:var(--shu); font-size:36px; font-variant-numeric:tabular-nums; }
@@ -340,6 +366,7 @@
 <!-- 出題 -->
 <section id="play" class="screen">
   <div class="paperbg"></div>
+  <button class="quit-btn" id="quitBtn" aria-label="やめて おうちへ もどる">✕</button>
   <div class="stage" id="stage"></div>
   <div class="q-foot" id="confirmWrap" style="display:none">
     <button class="kettei" id="confirmBtn" disabled>けってい</button>
@@ -446,6 +473,18 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- 取り返しのつかない操作の確認（やめる・ほぞんをけす） -->
+<div class="ask-ov" id="askOverlay">
+  <div class="ask-card">
+    <div class="ask-title" id="askTitle"></div>
+    <div class="ask-sub" id="askSub"></div>
+    <div class="ask-row">
+      <button class="ask-no" id="askNo">やめとく</button>
+      <button class="ask-yes" id="askYes">はい</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const CONTENT = "/pro/content/";
 const CFG_KEY = "ohanashi_play_cfg_v1";
@@ -484,9 +523,21 @@ const MARU_PATH = "M50 6 C18 4 5 34 8 58 C11 88 44 99 70 94 C96 89 98 54 88 33 C
 const STAMP_RANK = ["🌸","🎏","🎐","⭐","🍡","🏮","🎋","🪁"];
 
 let MANIFEST = [], ALIAS = {}, LABELS = {}, DEFECTS = [];   // DEFECTS=検品で欠陥確定→出題から除外中
+// localStorage は「壊れていても絶対にアプリを止めない」。1文字壊れただけで白画面になるのを防ぐ。
+function lsGet(key, fallback){
+  try{
+    const v=JSON.parse(localStorage.getItem(key) || "null");
+    return (v===null || typeof v!==typeof fallback || Array.isArray(v)!==Array.isArray(fallback)) ? fallback : v;
+  }catch(e){ console.warn("[ls] 壊れた記録を無視:", key, e); return fallback; }
+}
+// 容量超過(QuotaExceeded)で例外が飛ぶと採点直後に止まるので、必ず握って続行する
+function lsSet(key, value){
+  try{ localStorage.setItem(key, JSON.stringify(value)); return true; }
+  catch(e){ console.warn("[ls] 保存できません:", key, e); return false; }
+}
 let cfg = Object.assign({group:"C", level:1, yasashii:true, noise:false, parentRead:false,
                          schools:[], levelMode:"manual"},
-                        JSON.parse(localStorage.getItem(CFG_KEY) || "{}"));
+                        lsGet(CFG_KEY, {}));
 function newPlayer(){
   const a=new Audio();
   a.setAttribute("playsinline","");           // iOS: 全画面プレイヤーに奪われない
@@ -499,10 +550,23 @@ try{ if(navigator.audioSession) navigator.audioSession.type = "playback"; }catch
 let session = null;
 let audioReady = false, playSeq = 0, lastAudioErr = "";
 
-function saveCfg(){ localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
+function saveCfg(){ lsSet(CFG_KEY, cfg); }
 function esc(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 function show(id){ document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active")); document.getElementById(id).classList.add("active"); }
 function toast(msg){ const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),1800); }
+// 取り返しのつかない操作の前に出す確認。window.confirm は端末で見た目が壊れるので自前。
+function confirmKid(title, sub, yes){
+  return new Promise((resolve)=>{
+    const ov=document.getElementById("askOverlay");
+    document.getElementById("askTitle").textContent=title;
+    document.getElementById("askSub").textContent=sub||"";
+    const y=document.getElementById("askYes"), n=document.getElementById("askNo");
+    y.textContent=yes||"はい";
+    const close=(v)=>{ ov.classList.remove("show"); y.onclick=null; n.onclick=null; resolve(v); };
+    y.onclick=()=>close(true); n.onclick=()=>close(false);
+    ov.classList.add("show");
+  });
+}
 // こども画面は軽量版(448px WebP・1枚 約40KB)を使う。正本の1024px PNG(約1MB)は
 // 検品UI用。回線が細いときの待ち時間とオフライン保存の容量を1/20以下にするため。
 function canonImg(key){ const c=ALIAS[key]||key; return `${CONTENT}images_small/${esc(c)}.webp`; }
@@ -527,6 +591,7 @@ Promise.all([
   // 検品で欠陥が確定したユニットは出題しない（データは残す＝直したら戻せる）
   const bad=new Set(DEFECTS);
   MANIFEST=(m.items||[]).filter(it=>!bad.has(it.unit_id));
+  pruneReview();               // 隔離された話の復習が残るとバッジと実出題がズレる
   refreshToday();
 });
 
@@ -561,7 +626,9 @@ function refreshToday(){
 // おまかせレベル: 直近の成績を見て、本番相当レベルまで少しずつ上げる（下げるときは1段ずつ）
 function autoAdjustLevel(){
   if(cfg.levelMode!=="auto") return;
-  const hist=loadHist().filter(s=>s.l===cfg.level).slice(-3);
+  // 模試・まちがいなおし・別グループの成績が混ざると誤って上げ下げする
+  const g=cfg.group;
+  const hist=loadHist().filter(s=>s.l===cfg.level && (!s.m || s.m==="single") && (!s.g || s.g===g)).slice(-3);
   if(hist.length<2) return;                       // 判断材料が足りないうちは動かさない
   let n=0, ok=0;
   hist.forEach(s=>s.a.forEach(x=>{ n++; ok+=x.c; }));
@@ -579,8 +646,8 @@ function autoAdjustLevel(){
 }
 
 // ---------- まちがい直し（変奏復習・忘却曲線） ----------
-function loadReview(){ try{ return JSON.parse(localStorage.getItem(REVIEW_KEY)||"{}"); }catch(e){ return {}; } }
-function saveReview(r){ localStorage.setItem(REVIEW_KEY, JSON.stringify(r)); }
+function loadReview(){ return lsGet(REVIEW_KEY, {}); }
+function saveReview(r){ lsSet(REVIEW_KEY, r); }
 function dayKey(d){ return d.toLocaleDateString("sv"); }
 function addDays(n){ const d=new Date(); d.setDate(d.getDate()+n); return dayKey(d); }
 
@@ -599,7 +666,16 @@ function scheduleReview(unitId, qId, correct){
 }
 function dueReviewItems(){
   const today=dayKey(new Date());
-  return Object.values(loadReview()).filter(x=>x && x.due && x.due<=today);
+  const live=new Set(MANIFEST.map(u=>u.unit_id));   // 隔離された話は出題できない＝数えない
+  return Object.values(loadReview()).filter(x=>x && x.due && x.due<=today && live.has(x.u));
+}
+// 出題対象から消えた話の復習エントリを掃除する（残すとバッジだけ増えて出題されない）
+function pruneReview(){
+  if(!MANIFEST.length) return;
+  const live=new Set(MANIFEST.map(u=>u.unit_id)), r=loadReview();
+  let n=0;
+  Object.keys(r).forEach(k=>{ if(!live.has((r[k]||{}).u)){ delete r[k]; n++; } });
+  if(n){ saveReview(r); console.info("[review] 出題できない復習を掃除:", n, "件"); }
 }
 function refreshReviewBadge(){
   const btn=document.getElementById("reviewBtn"), n=dueReviewItems().length;
@@ -690,6 +766,14 @@ function startMoshi(){
   const pool = poolForPlay().slice();
   if(!pool.length){ noPoolToast(); return; }
   for(let i=pool.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [pool[i],pool[j]]=[pool[j],pool[i]]; }
+  // 本番は3話。いまのレベルに在庫が足りなければ近いレベルから足して3話にする
+  if(pool.length < MOSHI_N){
+    const seen=new Set(pool.map(u=>u.unit_id));
+    for(const u of offlineCandidates()){
+      if(pool.length>=MOSHI_N) break;
+      if(!seen.has(u.unit_id)){ seen.add(u.unit_id); pool.push(u); }
+    }
+  }
   const queue = pool.slice(0, Math.min(MOSHI_N, pool.length));
   session = { mode:"moshi", strict:true, queue, ui:0, unit:queue[0], qi:0, answers:[], results:[] };
   prefetchUnit(session.unit);   // 設問の音声もここで先読みしておく（もんだいへ進んだ瞬間に鳴らす）
@@ -721,8 +805,14 @@ function audioUnlock(){
 const blobCache = new Map();     // src -> objectURL（取得ずみ）
 const inflight  = new Map();     // src -> Promise（二重取得しない）
 const dlProgress= new Map();     // src -> 0..1（進行バー用）
+const FETCH_TIMEOUT_MS = 20000;   // 通信がぶら下がったまま待ち続けない
+function fetchWithTimeout(url, ms){
+  const ac = (typeof AbortController!=="undefined") ? new AbortController() : null;
+  const t = setTimeout(()=>{ try{ ac && ac.abort(); }catch(e){} }, ms||FETCH_TIMEOUT_MS);
+  return fetch(url, ac?{signal:ac.signal}:undefined).finally(()=>clearTimeout(t));
+}
 async function fetchAudioBlob(src){
-  const res = await fetch(src);
+  const res = await fetchWithTimeout(src);
   if(!res.ok) throw new Error("HTTP "+res.status);
   const total = +(res.headers.get("content-length") || 0);
   let b;
@@ -876,6 +966,7 @@ function askTapToPlay(src, seq, resolve){
 
 // STEP1: 指示
 function runInstruction(){
+  if(!session) return;            // 途中で「やめる」を押した後の呼び出しを無視する
   document.getElementById("confirmWrap").style.display="none";
   const tag = session.mode==="moshi" ? `<div class="moshi-tag">もぎしけん ${session.ui+1} / ${session.queue.length}</div>` : "";
   document.getElementById("stage").innerHTML =
@@ -888,9 +979,10 @@ function runInstruction(){
 }
 // STEP2: 本文（おうちのかたが読む／音声で聞く）
 function runStory(){
+  if(!session) return;            // 同上（音声の ended などが遅れて届くことがある）
   const unit=session.unit, nsc=unit.story_scenes.length;
 
-  if(cfg.parentRead){   // 親が読むモード: 音声を使わず原稿＋読み上げペースを表示
+  if(cfg.parentRead && !(session && session.strict)){   // 親が読むモード（もぎしけんでは本番どおり音声のみ）
     const secs=Math.max(1, Math.round(unit.expected_duration_sec||0));
     document.getElementById("stage").innerHTML =
       `<div class="read-pane">
@@ -936,6 +1028,7 @@ function runStory(){
 }
 // STEP3: 設問
 function runQuestion(){
+  if(!session) return;
   const unit=session.unit, q=unit.questions[session.qi];
   const col=K_COLOR[q.instruction.color]||"var(--shu)", mk=MARK[q.instruction.mark]||"○", multi=q.instruction.multi;
   const stage=document.getElementById("stage");
@@ -1004,10 +1097,12 @@ function startRing(q, onTimeUp){
 }
 // STEP4: 採点
 function grade(q, picked){
+  if(!session) return;
   const stage=document.getElementById("stage");
   const correctIdx=q.choices.map((c,i)=>q.correct.includes(c.id)?i:-1).filter(i=>i>=0);
   const pa=[...picked].sort();
-  const ok = pa.length===correctIdx.length && pa.every(i=>correctIdx.includes(i));
+  // correctIdx が空（正解IDが選択肢に無い不良データ）のとき、未回答=0個が「正解」になってしまうのを防ぐ
+  const ok = correctIdx.length>0 && pa.length===correctIdx.length && pa.every(i=>correctIdx.includes(i));
   session.answers.push({q_id:q.q_id, type:q.type, correct:ok});
   scheduleReview(session.unit.unit_id, q.q_id, ok);   // 誤答は翌日へ／正解なら間隔を延ばす
   document.getElementById("confirmBtn").disabled=true;
@@ -1021,12 +1116,15 @@ function grade(q, picked){
       const g=btn.querySelector(".grade"); requestAnimationFrame(()=>g.querySelector(".maru-svg").classList.add("maru-draw","run")); }
     else if(picked.has(i)) btn.classList.add("reveal-wrong");
   });
-  setTimeout(()=>{ session.qi++;
+  setTimeout(()=>{
+    if(!session) return;          // 採点の演出中に「やめる」を押した場合
+    session.qi++;
     if(session.qi < session.unit.questions.length) runQuestion(); else completeUnit();
   }, 1900);
 }
 // STEP5: 1話の完了 → 記録して次へ / けっか
 function completeUnit(){
+  if(!session) return;
   stopNoise();
   refreshReviewBadge();
   const ans=session.answers, n=ans.length, ok=ans.filter(a=>a.correct).length, perfect=ok===n;
@@ -1087,20 +1185,36 @@ function showMultiResult(){
 }
 document.getElementById("resHome").onclick=()=>{ refreshToday(); show("home"); };
 
+// 出題中に「やめる」。子どもが途中で離脱できないと、分からない話に閉じ込められる。
+document.getElementById("quitBtn").onclick=async ()=>{
+  const wasPlaying = !audio.paused;
+  try{ audio.pause(); }catch(e){}
+  const ok=await confirmKid("やめて おうちへ もどる？", "いまの おはなしは きろくに のこりません", "やめる");
+  if(!ok){ if(wasPlaying){ try{ audio.play(); }catch(e){} } return; }
+  playSeq++;                       // 進行中の音声コールバックを無効化する
+  resetAudioEvents();
+  try{ audio.pause(); }catch(e){}
+  stopNoise();
+  session=null;
+  document.getElementById("confirmWrap").style.display="none";
+  refreshToday(); show("home");
+};
+
 // ---------- 記録（カレンダー・履歴） ----------
-function loadCal(){ try{ return JSON.parse(localStorage.getItem(CAL_KEY)||"{}"); }catch(e){ return {}; } }
+function loadCal(){ return lsGet(CAL_KEY, {}); }
 function recordDay(perfect, ok, total){
   const cal=loadCal(), key=new Date().toLocaleDateString("sv");
   const p=cal[key]||{solved:0,best:0,perfect:false};
   cal[key]={ solved:p.solved+1, best:Math.max(p.best,ok), total, perfect:p.perfect||perfect };
-  localStorage.setItem(CAL_KEY, JSON.stringify(cal));
+  lsSet(CAL_KEY, cal);
 }
-function loadHist(){ try{ return JSON.parse(localStorage.getItem(HIST_KEY)||"[]"); }catch(e){ return []; } }
+function loadHist(){ return lsGet(HIST_KEY, []); }
 function recordHistory(group, level, answers){
   const h=loadHist();
-  h.push({ d:new Date().toISOString(), g:group, l:level, a:answers.map(x=>({t:x.type, c:x.correct?1:0})) });
+  h.push({ d:new Date().toISOString(), g:group, l:level, m:(session&&session.mode)||"single",
+           a:answers.map(x=>({t:x.type, c:x.correct?1:0})) });
   while(h.length>300) h.shift();
-  localStorage.setItem(HIST_KEY, JSON.stringify(h));
+  lsSet(HIST_KEY, h);
 }
 function calcStreak(){
   const cal=loadCal(); const d=new Date();
@@ -1199,6 +1313,7 @@ document.getElementById("gateCancel").onclick=()=>{ gate.classList.remove("show"
 function clearHold(){ hold.classList.remove("holding"); clearTimeout(holdTimer); holdTimer=null; }
 ["mousedown","touchstart"].forEach(ev=>hold.addEventListener(ev,(e)=>{
   e.preventDefault(); hold.classList.add("holding");
+  clearTimeout(holdTimer);   // touchstart と mousedown が両方発火する端末で二重にセットされるのを防ぐ
   holdTimer=setTimeout(()=>{ gate.classList.remove("show"); clearHold(); openSettings(); }, 1600);
 }));
 ["mouseup","touchend","touchcancel","mouseleave"].forEach(ev=>hold.addEventListener(ev,clearHold));
@@ -1271,7 +1386,7 @@ const OFFLINE_KEY = "ohanashi_pro_offline_v1";
 const OFFLINE_N   = 30;                        // まずは30話（容量をおさえるため）
 let offlineAbort=false, offlineBusy=false, offlineFailed=0;   // offlineFailed=取得できなかった数（検証用）
 
-function offlineState(){ try{ return JSON.parse(localStorage.getItem(OFFLINE_KEY)||"{}"); }catch(e){ return {}; } }
+function offlineState(){ return lsGet(OFFLINE_KEY, {}); }
 function offlineUnits(){ return new Set(offlineState().units||[]); }
 function mb(bytes){ return (bytes/1048576).toFixed(1); }
 
@@ -1299,7 +1414,7 @@ function unitAssets(u){
 async function cachePut(url, cache){
   const hit=await cache.match(url);
   if(hit){ const b=await hit.blob(); return b.size; }        // すでに保存済み
-  const res=await fetch(url, {cache:"no-store"});
+  const res=await fetchWithTimeout(url);
   if(!res.ok) return 0;
   await cache.put(url, res.clone());
   const b=await res.blob();
@@ -1357,29 +1472,36 @@ async function saveOffline(){
       CONTENT+"choice_labels.json", CONTENT+"defect_units.json"];
     const lists=units.map(unitAssets);
     const total=shellUrls.length + lists.reduce((n,l)=>n+l.length,0);
-    let done=0, bytes=0, unitDone=0, failed=0; offlineFailed=0;
-    const tick=()=>renderOffline({done,total,bytes,unitDone,units:units.length});
+    let done=0, bytes=0, failed=0; offlineFailed=0;
+    const savedUnits=[], savedUrls=new Set(offlineState().urls||[]);   // 何を入れたかを覚えておく
+    const tick=()=>renderOffline({done,total,bytes,unitDone:savedUnits.length,units:units.length});
     tick();
-    for(const u of shellUrls){ bytes+=await cachePut(u, shell); done++; tick(); }
+    for(const u of shellUrls){ bytes+=await cachePut(u, shell); done++; savedUrls.add(u); tick(); }
     for(let i=0;i<lists.length;i++){
+      let okAll=true;
       for(const url of lists[i]){
         if(offlineAbort) break;
         const n=await cachePut(url, media);
-        if(!n){ failed++; offlineFailed++; console.warn("[offline] 取得できず", url); }
+        // 1つでも取れなければ、その話は「保存できた」ことにしない（あとで無音・絵なしになるため）
+        if(!n){ failed++; offlineFailed++; okAll=false; console.warn("[offline] 取得できず", url); }
+        else savedUrls.add(url);
         bytes+=n; done++;
         if(done%4===0) tick();
       }
       if(offlineAbort) break;
-      unitDone++; tick();
+      if(okAll) savedUnits.push(units[i]);
+      tick();
     }
-    const saved=units.slice(0, unitDone).map(u=>u.unit_id);
-    const lvs=[...new Set(units.slice(0, unitDone).map(u=>u.level))].sort();
+    const saved=savedUnits.map(u=>u.unit_id);
+    const lvs=[...new Set(savedUnits.map(u=>u.level))].sort();
     const label=`グループ${activeGroups().join("・")} ・ レベル${lvs.join("・")}`;
-    localStorage.setItem(OFFLINE_KEY, JSON.stringify(
-      {units:saved, bytes, saved_at:new Date().toISOString(), label}));
+    // urls には「前回の保存分」も残す。設定を変えて保存し直しても消し漏れが出ないようにするため。
+    lsSet(OFFLINE_KEY, {units:saved, urls:[...savedUrls], bytes,
+                        saved_at:new Date().toISOString(), label});
     renderOffline();
     toast(offlineAbort ? `${saved.length}話まで ほぞんしました`
-                       : `${saved.length}話を ほぞんしました（${mb(bytes)} MB）`);
+                       : (failed ? `${saved.length}話を ほぞんしました（${failed}こ とれませんでした）`
+                                 : `${saved.length}話を ほぞんしました（${mb(bytes)} MB）`));
     if(failed) console.warn("[offline] 取得できなかったファイル", failed, "件");
   }catch(e){
     console.error("[offline]", e);
@@ -1393,14 +1515,23 @@ async function saveOffline(){
 
 async function clearOffline(){
   const s=offlineState();
-  if(!s.units || !s.units.length) return;
+  if(!(s.units||[]).length && !(s.urls||[]).length) return;
+  if(!await confirmKid("ほぞんした おはなしを けしますか？",
+                       "けすと インターネットが ないときに つかえなくなります", "けす")) return;
   const media=await caches.open(MEDIA_CACHE);
-  const targets=new Set();
-  s.units.forEach(id=>{ const u=MANIFEST.find(x=>x.unit_id===id); if(u) unitAssets(u).forEach(x=>targets.add(x)); });
-  for(const url of targets) await media.delete(url);
+  // 保存したURLそのものを消す（MANIFEST 由来だと、隔離された話や旧設定で保存した分が消し漏れる）
+  const targets=new Set(s.urls||[]);
+  (s.units||[]).forEach(id=>{ const u=MANIFEST.find(x=>x.unit_id===id); if(u) unitAssets(u).forEach(x=>targets.add(x)); });
+  let removed=0;
+  for(const url of targets){ if(await media.delete(url)) removed++; }
+  // 取りこぼし対策: メディアキャッシュに残った音声・絵も掃除する（シェルのJSONは残す）
+  const rest=await media.keys();
+  for(const req of rest){
+    if(/\/pro\/content\/.*\.(mp3|webp|png)$/.test(new URL(req.url).pathname)){ await media.delete(req); removed++; }
+  }
   localStorage.removeItem(OFFLINE_KEY);
   renderOffline();
-  toast("ほぞんを けしました");
+  toast(`ほぞんを けしました（${removed}こ）`);
 }
 // 実機（とくにiPhone）で音が出ないときの切り分け。短い設問音声を1本鳴らして状態を出す。
 function soundDiag(){
